@@ -1,0 +1,156 @@
+import { Injectable } from '@angular/core';
+import { HttpClient, HttpParams } from '@angular/common/http';
+import { Observable } from 'rxjs';
+import { environment } from '../../../environments/environment';
+import {
+  User, CreditScore, Loan, Funding, Repayment, Transaction,
+  Notification, AutoInvestPrefs, Analytics, RiskFlag,
+  ScheduleEntry, VoiceResponse, FundResult, RepayResult,
+} from '../models';
+
+const BASE = environment.apiUrl;
+
+@Injectable({ providedIn: 'root' })
+export class ApiService {
+  constructor(private http: HttpClient) {}
+
+  // ── Profile ────────────────────────────────────────────
+  me(): Observable<User> {
+    return this.http.get<User>(`${BASE}/users/me`);
+  }
+
+  myCreditScore(): Observable<CreditScore> {
+    return this.http.get<CreditScore>(`${BASE}/users/me/credit-score`);
+  }
+
+  myTransactions(): Observable<Transaction[]> {
+    return this.http.get<Transaction[]>(`${BASE}/users/me/transactions`);
+  }
+
+  // ── Auto-invest preferences (lender) ──────────────────
+  getAutoInvest(): Observable<AutoInvestPrefs> {
+    return this.http.get<AutoInvestPrefs>(`${BASE}/users/me/auto-invest`);
+  }
+
+  updateAutoInvest(prefs: Partial<AutoInvestPrefs>): Observable<AutoInvestPrefs> {
+    return this.http.put<AutoInvestPrefs>(`${BASE}/users/me/auto-invest`, prefs);
+  }
+
+  // ── Loans ──────────────────────────────────────────────
+  requestLoan(payload: {
+    amount: number;
+    duration_days: number;
+    purpose?: string;
+    source?: string;
+  }): Observable<Loan> {
+    return this.http.post<Loan>(`${BASE}/loans`, payload);
+  }
+
+  listLoans(params: { status?: string; mine?: boolean } = {}): Observable<Loan[]> {
+    let p = new HttpParams();
+    if (params.status) p = p.set('status', params.status);
+    if (params.mine)   p = p.set('mine', 'true');
+    return this.http.get<Loan[]>(`${BASE}/loans`, { params: p });
+  }
+
+  getLoan(id: string): Observable<Loan> {
+    return this.http.get<Loan>(`${BASE}/loans/${id}`);
+  }
+
+  getLoanFundings(id: string): Observable<Funding[]> {
+    return this.http.get<Funding[]>(`${BASE}/loans/${id}/fundings`);
+  }
+
+  getLoanRepayments(id: string): Observable<Repayment[]> {
+    return this.http.get<Repayment[]>(`${BASE}/loans/${id}/repayments`);
+  }
+
+  getLoanSchedule(id: string): Observable<ScheduleEntry[]> {
+    return this.http.get<ScheduleEntry[]>(`${BASE}/loans/${id}/schedule`);
+  }
+
+  fundLoan(id: string, amount: number): Observable<FundResult> {
+    return this.http.post<FundResult>(`${BASE}/loans/${id}/fund`, { amount });
+  }
+
+  repayLoan(id: string, amount: number): Observable<RepayResult> {
+    return this.http.post<RepayResult>(`${BASE}/loans/${id}/repay`, { amount });
+  }
+
+  // ── Notifications ──────────────────────────────────────
+  getNotifications(unreadOnly = false): Observable<Notification[]> {
+    let p = new HttpParams();
+    if (unreadOnly) p = p.set('unread_only', 'true');
+    return this.http.get<Notification[]>(`${BASE}/notifications`, { params: p });
+  }
+
+  markNotificationRead(id: string): Observable<void> {
+    return this.http.patch<void>(`${BASE}/notifications/${id}/read`, {});
+  }
+
+  markAllNotificationsRead(): Observable<void> {
+    return this.http.patch<void>(`${BASE}/notifications/read-all`, {});
+  }
+
+  // ── Voice ──────────────────────────────────────────────
+  voiceTurn(text: string, sessionId?: string): Observable<VoiceResponse> {
+    return this.http.post<VoiceResponse>(`${BASE}/voice/turn`, {
+      text,
+      session_id: sessionId,
+    });
+  }
+
+  dtmfTurn(digit: string, sessionId?: string): Observable<VoiceResponse> {
+    let p = new HttpParams();
+    if (sessionId) p = p.set('session_id', sessionId);
+    return this.http.post<VoiceResponse>(`${BASE}/voice/dtmf/${digit}`, {}, { params: p });
+  }
+
+  // ── Export ─────────────────────────────────────────────
+  exportTransactions(format: 'csv' | 'pdf'): Observable<Blob> {
+    return this.http.get(`${BASE}/users/me/export`, {
+      params: new HttpParams().set('format', format).set('type', 'transactions'),
+      responseType: 'blob',
+    });
+  }
+
+  adminExport(format: 'csv' | 'pdf', type: string): Observable<Blob> {
+    return this.http.get(`${BASE}/admin/export`, {
+      params: new HttpParams().set('format', format).set('type', type),
+      responseType: 'blob',
+    });
+  }
+
+  // ── Admin ──────────────────────────────────────────────
+  adminUsers(): Observable<User[]> {
+    return this.http.get<User[]>(`${BASE}/admin/users`);
+  }
+
+  adminLoans(): Observable<Loan[]> {
+    return this.http.get<Loan[]>(`${BASE}/admin/loans`);
+  }
+
+  adminRepayments(): Observable<Repayment[]> {
+    return this.http.get<Repayment[]>(`${BASE}/admin/repayments`);
+  }
+
+  adminTransactions(): Observable<Transaction[]> {
+    return this.http.get<Transaction[]>(`${BASE}/admin/transactions`);
+  }
+
+  adminAnalytics(): Observable<Analytics> {
+    return this.http.get<Analytics>(`${BASE}/admin/analytics`);
+  }
+
+  adminFlags(): Observable<RiskFlag[]> {
+    return this.http.get<RiskFlag[]>(`${BASE}/admin/flags`);
+  }
+
+  createFlag(payload: Partial<RiskFlag>): Observable<RiskFlag> {
+    return this.http.post<RiskFlag>(`${BASE}/admin/flags`, payload);
+  }
+
+  resolveFlag(id: string): Observable<RiskFlag> {
+    return this.http.patch<RiskFlag>(`${BASE}/admin/flags/${id}/resolve`, {});
+  }
+}

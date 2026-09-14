@@ -1,0 +1,109 @@
+name: finlend
+
+services:
+  mongodb:
+    image: mongo:7
+    container_name: finlend-mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    networks:
+      - finlend-network
+
+  blockchain:
+    build:
+      context: ./blockchain
+      dockerfile: Dockerfile
+    container_name: finlend-blockchain
+    restart: unless-stopped
+    ports:
+      - "8545:8545"
+    volumes:
+      - blockchain_shared:/app
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /app/deployed-address.json"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 10s
+    networks:
+      - finlend-network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: finlend-backend
+    restart: unless-stopped
+    environment:
+      # Docker-internal networking (always correct regardless of .env) --
+      # never localhost/127.0.0.1 between containers.
+      MONGODB_URI: mongodb://mongodb:27017
+      WEB3_PROVIDER_URI: http://blockchain:8545
+      # Everything else preserves the app's existing configurable settings,
+      # sourced from the root .env file (copy .env.example -> .env).
+      MONGODB_DATABASE: ${MONGODB_DATABASE:-finlend}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-dev-secret-change-me}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-120}
+      APP_ENV: ${APP_ENV:-development}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:4200}
+      PORT: ${PORT:-8000}
+      CONTRACT_ADDRESS: ${CONTRACT_ADDRESS:-}
+      DEPLOYER_PRIVATE_KEY: ${DEPLOYER_PRIVATE_KEY:-}
+      BLOCKCHAIN_ENABLED: ${BLOCKCHAIN_ENABLED:-true}
+      BLOCKCHAIN_NETWORK_NAME: ${BLOCKCHAIN_NETWORK_NAME:-hardhat-local}
+      BLOCK_EXPLORER_BASE_URL: ${BLOCK_EXPLORER_BASE_URL:-}
+      VOICE_PROVIDER: ${VOICE_PROVIDER:-demo}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GOOGLE_TTS_API_KEY: ${GOOGLE_TTS_API_KEY:-}
+      MODEL_PATH: ${MODEL_PATH:-app/ml/artifacts/risk_model.joblib}
+    ports:
+      - "8000:8000"
+    volumes:
+      - blockchain_shared:/blockchain:ro
+      - backend_ml_artifacts:/app/app/ml/artifacts
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      blockchain:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    networks:
+      - finlend-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: finlend-frontend
+    restart: unless-stopped
+    ports:
+      - "4200:80"
+    depends_on:
+      backend:
+        condition: service_started
+    networks:
+      - finlend-network
+
+networks:
+  finlend-network:
+    driver: bridge
+
+volumes:
+  mongodb_data:
+  blockchain_shared:
+  backend_ml_artifacts:
