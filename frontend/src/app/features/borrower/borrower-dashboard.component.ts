@@ -12,6 +12,8 @@ import { ProgressBarComponent } from '../../shared/components/progress-bar.compo
 import { LoadingSpinnerComponent } from '../../shared/components/loading-spinner.component';
 import { EmptyStateComponent } from '../../shared/components/empty-state.component';
 import { ModalComponent } from '../../shared/components/modal.component';
+import { EMICalculatorComponent } from '../../shared/components/emi-calculator.component';
+import { CreditExplanationComponent } from '../../shared/components/credit-explanation.component';
 import type { Loan, CreditScore, ScheduleEntry, VoiceResponse } from '../../core/models';
 
 type WizardStep = 1 | 2 | 3;
@@ -40,6 +42,7 @@ const STATUS_ORDER: Record<string, number> = Object.fromEntries(
     CommonModule, FormsModule, RouterLink,
     NavbarComponent, StatusBadgeComponent, ProgressBarComponent,
     LoadingSpinnerComponent, EmptyStateComponent, ModalComponent,
+    EMICalculatorComponent, CreditExplanationComponent,
   ],
   template: `
     <app-navbar></app-navbar>
@@ -68,6 +71,10 @@ const STATUS_ORDER: Record<string, number> = Object.fromEntries(
           ></app-progress-bar>
           <app-status-badge [value]="credit()?.risk_category ?? ''" type="risk" [dot]="true"></app-status-badge>
           <p class="text-xs text-on-surface-muted mt-1">{{ credit()?.explanation }}</p>
+          <!-- Add credit explanation button -->
+          <div class="mt-2">
+            <app-credit-explanation></app-credit-explanation>
+          </div>
         </div>
 
         <!-- Borrowing limit -->
@@ -119,9 +126,22 @@ const STATUS_ORDER: Record<string, number> = Object.fromEntries(
       <div class="glass-card p-6">
         <div class="flex items-center justify-between mb-5">
           <div>
-            <h2 class="section-title">Request a loan</h2>
-            <p class="section-subtitle">Choose how you'd like to apply</p>
+            <h2 class="section-title">🎙️ Request Loan - Voice First</h2>
+            <p class="section-subtitle">Speak naturally in your language</p>
           </div>
+          
+          <!-- Language Selector -->
+          <div class="flex gap-2">
+            <button
+              *ngFor="let lang of languages"
+              (click)="changeLanguage(lang.code)"
+              [class]="selectedLanguage() === lang.code ? 'btn-primary text-xs px-2 py-1' : 'btn-secondary text-xs px-2 py-1'">
+              {{ lang.flag }} {{ lang.label }}
+            </button>
+          </div>
+        </div>
+        
+        <div class="mb-4">
           <!-- Mode tabs -->
           <div class="flex gap-1 bg-gray-100 dark:bg-white/10 p-1 rounded-xl">
             <button *ngFor="let m of modes"
@@ -217,6 +237,15 @@ const STATUS_ORDER: Record<string, number> = Object.fromEntries(
                 <span class="font-medium">Total due</span><span class="font-bold">₹{{ (wAmount * 1.1) | number:'1.2-2' }}</span>
               </div>
             </div>
+
+            <!-- EMI Calculator -->
+            <div class="border-t border-gray-200 dark:border-white/10 pt-4 mt-4">
+              <app-emi-calculator
+                [lockPrincipal]="true"
+                [lockDuration]="true"
+              ></app-emi-calculator>
+            </div>
+
             <div class="flex gap-3">
               <button class="btn-secondary flex-1" (click)="wizardStep.set(1)">← Back</button>
               <button class="btn-primary flex-1" (click)="wizNext()">Continue →</button>
@@ -242,40 +271,118 @@ const STATUS_ORDER: Record<string, number> = Object.fromEntries(
           </div>
         </div>
 
-        <!-- ─── VOICE MODE ───────────────────────────────────────────── -->
-        <div *ngIf="requestMode === 'voice'" class="animate-fade-in space-y-4 max-w-lg">
-          <p class="text-sm text-on-surface-muted">
-            Speak naturally — e.g. <em>"I need a loan of 5000 rupees for 30 days"</em> — or type in the box below.
-          </p>
-          <div class="flex gap-2">
-            <button class="btn-secondary gap-2" (click)="startListening()" [disabled]="listening()">
-              <span class="text-lg">🎙</span> {{ listening() ? 'Listening…' : 'Start recording' }}
-              <span *ngIf="listening()" class="w-2 h-2 rounded-full bg-danger-500 animate-pulse-ring"></span>
-            </button>
-            <button class="btn-secondary" (click)="stopListening()" [disabled]="!listening()">⏹ Stop</button>
-          </div>
-          <textarea
-            class="input-field resize-none"
-            rows="3"
-            [(ngModel)]="voiceText"
-            name="voiceText"
-            placeholder="Or type your request here…"
-          ></textarea>
-          <button class="btn-primary" (click)="sendVoiceText()" [disabled]="submitting() || !voiceText.trim()">
-            <app-spinner *ngIf="submitting()" mode="inline" size="sm"></app-spinner>
-            Send
-          </button>
-
-          <!-- Voice reply card -->
-          <div *ngIf="voiceReply()" class="glass-panel p-4 space-y-2 text-sm animate-fade-in">
-            <div class="flex items-center gap-2 font-semibold text-on-surface">
-              <span>🤖</span> Assistant response
+        <!-- ─── VOICE MODE (PRIMARY) ───────────────────────────────────────────── -->
+        <div *ngIf="requestMode === 'voice'" class="animate-fade-in space-y-4">
+          
+          <!-- Voice Instructions with Examples -->
+          <div class="glass-panel p-5 bg-gradient-to-br from-brand/10 to-brand/5">
+            <h3 class="text-lg font-semibold text-on-surface mb-2 flex items-center gap-2">
+              <span class="text-2xl">🎤</span>
+              Speak Naturally
+            </h3>
+            <p class="text-sm text-on-surface-muted mb-3">
+              Tell me what you need. I understand {{ selectedLanguage() === 'hi' ? 'हिंदी' : selectedLanguage() === 'te' ? 'తెలుగు' : 'English' }}.
+            </p>
+            
+            <!-- Example Prompts -->
+            <div class="bg-surface/50 rounded-lg p-3 text-xs space-y-1">
+              <p class="font-medium text-on-surface mb-2">Examples:</p>
+              <p *ngIf="selectedLanguage() === 'en'" class="text-on-surface-muted">
+                • "I need a loan of 5000 rupees for 65 days"<br>
+                • "Check my credit score"<br>
+                • "Show my balance"
+              </p>
+              <p *ngIf="selectedLanguage() === 'hi'" class="text-on-surface-muted">
+                • "मुझे 5000 रुपये का 65 दिन का लोन चाहिए"<br>
+                • "मेरा क्रेडिट स्कोर क्या है?"<br>
+                • "बैलेंस चेक करें"
+              </p>
+              <p *ngIf="selectedLanguage() === 'te'" class="text-on-surface-muted">
+                • "నాకు 5000 రూపాయల 65 రోజుల లోన్ కావాలి"<br>
+                • "నా క్రెడిట్ స్కోర్ ఎంత?"<br>
+                • "బ్యాలెన్స్ చెక్ చేయండి"
+              </p>
             </div>
-            <p>{{ voiceReply()!.reply_text }}</p>
-            <div class="flex gap-3 text-xs text-on-surface-muted pt-1 border-t border-gray-200 dark:border-white/10">
-              <span>Intent: <strong>{{ voiceReply()!.intent }}</strong></span>
+          </div>
+
+          <!-- Voice Input Controls -->
+          <div class="glass-panel p-6 space-y-4">
+            
+            <!-- Large Microphone Button -->
+            <div class="flex flex-col items-center justify-center gap-3">
+              <button
+                *ngIf="!listening()"
+                (click)="startListening()"
+                class="w-24 h-24 rounded-full bg-gradient-to-br from-brand to-brand-dark text-white shadow-xl hover:scale-105 transition-transform flex items-center justify-center"
+                title="Click to speak">
+                <span class="text-5xl">🎙️</span>
+              </button>
+              
+              <button
+                *ngIf="listening()"
+                (click)="stopListening()"
+                class="w-24 h-24 rounded-full bg-red-500 text-white shadow-xl animate-pulse flex items-center justify-center"
+                title="Click to stop">
+                <span class="text-5xl">⏸️</span>
+              </button>
+              
+              <p class="text-sm font-medium text-center" [class.text-red-600]="listening()" [class.animate-pulse]="listening()">
+                {{ listening() ? '🎤 Listening... Speak now!' : 'Tap microphone to speak' }}
+              </p>
+            </div>
+
+            <!-- Text Input (Fallback/Alternative) -->
+            <div class="relative">
+              <textarea
+                class="input-field resize-none text-base"
+                rows="3"
+                [(ngModel)]="voiceText"
+                name="voiceText"
+                [placeholder]="getPlaceholder()"
+              ></textarea>
+              
+              <button 
+                *ngIf="voiceText.trim()"
+                (click)="voiceText = ''"
+                class="absolute top-2 right-2 text-on-surface-muted hover:text-on-surface text-lg"
+                title="Clear">
+                ✕
+              </button>
+            </div>
+            
+            <!-- Send Button -->
+            <button 
+              class="btn-primary w-full text-lg py-4 font-semibold" 
+              (click)="sendVoiceText()" 
+              [disabled]="submitting() || !voiceText.trim()">
+              <app-spinner *ngIf="submitting()" mode="inline" size="sm"></app-spinner>
+              <span *ngIf="!submitting()">{{ selectedLanguage() === 'hi' ? '🗣️ भेजें' : selectedLanguage() === 'te' ? '🗣️ పంపండి' : '🗣️ Send Message' }}</span>
+            </button>
+          </div>
+
+          <!-- Voice Response Card -->
+          <div *ngIf="voiceReply()" class="glass-panel p-6 space-y-4 text-base animate-fade-in border-2 border-brand/30">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2 font-semibold text-on-surface text-lg">
+                <span class="text-2xl">🤖</span> 
+                <span>{{ selectedLanguage() === 'hi' ? 'सहायक का जवाब' : selectedLanguage() === 'te' ? 'సహాయకుడి సమాధానం' : 'Assistant Response' }}</span>
+              </div>
+              <button (click)="stopSpeaking()" class="text-on-surface-muted hover:text-on-surface text-sm">
+                🔇 Stop Audio
+              </button>
+            </div>
+            
+            <p class="leading-relaxed text-lg">{{ voiceReply()!.reply_text }}</p>
+            
+            <!-- Metadata -->
+            <div class="flex flex-wrap gap-3 text-sm text-on-surface-muted pt-3 border-t border-gray-200 dark:border-white/10">
+              <span>💬 <strong>{{ voiceReply()!.intent }}</strong></span>
               <span>·</span>
-              <span>Transcript: <em>{{ voiceReply()!.transcript }}</em></span>
+              <span>📝 {{ voiceReply()!.transcript }}</span>
+              <span *ngIf="voiceReply()!.entities?.amount">·</span>
+              <span *ngIf="voiceReply()!.entities?.amount">💰 ₹{{ voiceReply()!.entities.amount }}</span>
+              <span *ngIf="voiceReply()!.entities?.duration_days">·</span>
+              <span *ngIf="voiceReply()!.entities?.duration_days">📅 {{ voiceReply()!.entities.duration_days }} days</span>
             </div>
           </div>
         </div>
@@ -538,7 +645,7 @@ export class BorrowerDashboardComponent implements OnInit {
   listening     = signal(false);
 
   // Loan request wizard
-  requestMode: RequestMode = 'wizard';
+  requestMode: RequestMode = 'voice';  // Changed default to voice
   wizardStep = signal<WizardStep>(1);
   wAmount   = 1000;
   wDuration = 30;
@@ -550,6 +657,15 @@ export class BorrowerDashboardComponent implements OnInit {
   voiceReply = signal<VoiceResponse | null>(null);
   sessionId  = crypto.randomUUID();
   private recognition: any;
+  private synthesis: any;
+  selectedLanguage = signal<'en' | 'hi' | 'te'>('en');
+  
+  // Language voice mapping
+  private languageVoiceMap = {
+    'en': 'en-IN',
+    'hi': 'hi-IN',
+    'te': 'te-IN'
+  };
 
   // Repay modal
   repayModal    = signal(false);
@@ -574,9 +690,15 @@ export class BorrowerDashboardComponent implements OnInit {
   ];
   readonly dtmfKeys = ['1','2','3','4','5','6','7','8','9','*','0','#'];
   readonly modes = [
-    { id: 'wizard' as RequestMode, label: 'Wizard', icon: '✨' },
-    { id: 'voice'  as RequestMode, label: 'Voice',  icon: '🎙' },
+    { id: 'voice'  as RequestMode, label: 'Voice',  icon: '🎙️' },  // Voice first
+    { id: 'wizard' as RequestMode, label: 'Form', icon: '📝' },
     { id: 'keypad' as RequestMode, label: 'Keypad', icon: '📞' },
+  ];
+  
+  readonly languages = [
+    { code: 'en' as const, label: 'English', flag: '🇬🇧' },
+    { code: 'hi' as const, label: 'हिंदी', flag: '🇮🇳' },
+    { code: 'te' as const, label: 'తెలుగు', flag: '🇮🇳' },
   ];
 
   activeLoans = computed(() => this.loans().filter(l => l.status === 'ACTIVE' || l.status === 'LATE'));
@@ -670,10 +792,27 @@ export class BorrowerDashboardComponent implements OnInit {
   sendVoiceText() {
     if (!this.voiceText.trim()) return;
     this.submitting.set(true);
-    this.api.voiceTurn(this.voiceText, this.sessionId).subscribe({
+    // Use enhanced voice API with multilingual support
+    this.api.enhancedVoice({
+      text: this.voiceText,
+      language: this.selectedLanguage(),
+      session_id: this.sessionId,
+    }).subscribe({
       next: (res) => {
         this.submitting.set(false);
-        this.voiceReply.set(res);
+        // Map enhanced response to VoiceResponse format
+        this.voiceReply.set({
+          transcript: res.transcript || this.voiceText,
+          intent: res.intent || 'unknown',
+          entities: res.entities || {},
+          reply_text: res.reply_text || res.response || 'Request processed',
+          audio_available: res.audio_available || false,
+          session_id: res.session_id || this.sessionId,
+        });
+        
+        // Auto-play TTS response
+        this.speakResponse(res.reply_text || res.response || '', this.selectedLanguage());
+        
         this.voiceText = '';
         this.refresh();
       },
@@ -683,10 +822,59 @@ export class BorrowerDashboardComponent implements OnInit {
       },
     });
   }
+  
+  speakResponse(text: string, language: 'en' | 'hi' | 'te') {
+    if (!text) return;
+    
+    // Use browser's Web Speech API for TTS
+    if ('speechSynthesis' in window) {
+      // Cancel any ongoing speech
+      window.speechSynthesis.cancel();
+      
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = this.languageVoiceMap[language];
+      utterance.rate = 0.9; // Slightly slower for clarity
+      utterance.pitch = 1.0;
+      utterance.volume = 1.0;
+      
+      // Try to find a native voice for the language
+      const voices = window.speechSynthesis.getVoices();
+      const nativeVoice = voices.find(v => v.lang.startsWith(this.languageVoiceMap[language]));
+      if (nativeVoice) {
+        utterance.voice = nativeVoice;
+      }
+      
+      window.speechSynthesis.speak(utterance);
+    }
+  }
+  
+  stopSpeaking() {
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+    }
+  }
+  
+  changeLanguage(lang: 'en' | 'hi' | 'te') {
+    this.selectedLanguage.set(lang);
+    this.stopSpeaking();
+  }
+  
+  getPlaceholder(): string {
+    const placeholders = {
+      en: 'Or type your message here... (e.g., "I need 5000 rupees loan for 30 days")',
+      hi: 'या यहाँ टाइप करें... (उदाहरण: "मुझे 5000 रुपये का 30 दिन का लोन चाहिए")',
+      te: 'లేదా ఇక్కడ టైప్ చేయండి... (ఉదాహరణ: "నాకు 5000 రూపాయల 30 రోజుల లోన్ కావాలి")'
+    };
+    return placeholders[this.selectedLanguage()];
+  }
 
   pressDtmf(digit: string) {
     this.api.dtmfTurn(digit, this.sessionId).subscribe({
-      next:  (res) => { this.voiceReply.set(res); this.refresh(); },
+      next:  (res) => { 
+        this.voiceReply.set(res); 
+        this.speakResponse(res.reply_text, this.selectedLanguage());
+        this.refresh(); 
+      },
       error: (err) => this.toast.error('DTMF error', err?.error?.detail ?? 'Failed'),
     });
   }
@@ -698,21 +886,47 @@ export class BorrowerDashboardComponent implements OnInit {
       return;
     }
     this.recognition = new SR();
+    this.recognition.lang = this.languageVoiceMap[this.selectedLanguage()];
     this.recognition.continuous = true;
     this.recognition.interimResults = true;
+    
+    // BUG FIX: Use proper change detection for live transcript updates
     this.recognition.onresult = (e: any) => {
-      let t = '';
-      for (let i = 0; i < e.results.length; i++) t += e.results[i][0].transcript;
-      this.voiceText = t;
+      let finalTranscript = '';
+      let interimTranscript = '';
+      
+      for (let i = 0; i < e.results.length; i++) {
+        const transcript = e.results[i][0].transcript;
+        if (e.results[i].isFinal) {
+          finalTranscript += transcript + ' ';
+        } else {
+          interimTranscript += transcript;
+        }
+      }
+      
+      // Update the text field in real-time - this shows LIVE words as you speak
+      this.voiceText = (finalTranscript + interimTranscript).trim();
     };
+    
+    this.recognition.onerror = () => {
+      this.listening.set(false);
+      this.toast.error('Speech recognition error', 'Could not recognize speech');
+    };
+    
+    this.recognition.onend = () => {
+      this.listening.set(false);
+    };
+    
     this.recognition.start();
     this.listening.set(true);
   }
 
   stopListening() {
+    // BUG FIX: Only stop recording, DON'T auto-send
+    // User must click "Send Message" button to submit
     this.recognition?.stop();
     this.listening.set(false);
-    this.sendVoiceText();
+    // REMOVED: this.sendVoiceText(); - This was causing auto-send bug
   }
 
   // ── Repay modal ───────────────────────────────────────────────────────

@@ -16,6 +16,8 @@ import { ProgressBarComponent } from '../../shared/components/progress-bar.compo
 import { LoadingSpinnerComponent } from '../../shared/components/loading-spinner.component';
 import { EmptyStateComponent } from '../../shared/components/empty-state.component';
 import { ModalComponent } from '../../shared/components/modal.component';
+import { BlockchainVerificationComponent } from '../../shared/components/blockchain-verification.component';
+import { CreditExplanationComponent } from '../../shared/components/credit-explanation.component';
 import type { Loan, ScheduleEntry, CreditHistoryEntry } from '../../core/models';
 import { FormsModule } from '@angular/forms';
 
@@ -27,6 +29,7 @@ import { FormsModule } from '@angular/forms';
     CommonModule, FormsModule, RouterLink,
     NavbarComponent, StatusBadgeComponent, ProgressBarComponent,
     LoadingSpinnerComponent, EmptyStateComponent, ModalComponent,
+    BlockchainVerificationComponent, CreditExplanationComponent,
   ],
   template: `
     <app-navbar></app-navbar>
@@ -67,6 +70,8 @@ import { FormsModule } from '@angular/forms';
                       class="btn-primary text-xs" (click)="openRepay(l)">💸 Repay</button>
               <button *ngIf="l.status === 'ACTIVE' || l.status === 'LATE'"
                       class="btn-secondary text-xs" (click)="openSchedule(l)">📅 Schedule</button>
+              <button class="btn-secondary text-xs" (click)="openBlockchain(l)">🔗 Verify</button>
+              <app-credit-explanation *ngIf="l.status === 'REJECTED'" [loanId]="l.id"></app-credit-explanation>
             </div>
           </div>
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -171,6 +176,19 @@ import { FormsModule } from '@angular/forms';
         </div>
       </div>
     </app-modal>
+
+    <!-- Blockchain verification modal -->
+    <app-modal
+      [open]="blockchainModal()"
+      title="Blockchain Verification"
+      [subtitle]="blockchainLoan() ? 'Loan #' + blockchainLoan()!.id.slice(-6) : ''"
+      (close)="blockchainModal.set(false)"
+    >
+      <app-blockchain-verification
+        *ngIf="blockchainLoan()"
+        [loanId]="blockchainLoan()!.id"
+      ></app-blockchain-verification>
+    </app-modal>
   `,
 })
 export class BorrowerLoansComponent implements OnInit {
@@ -187,6 +205,9 @@ export class BorrowerLoansComponent implements OnInit {
   scheduleModal = signal(false);
   schedule      = signal<ScheduleEntry[]>([]);
   schedLoading  = signal(false);
+
+  blockchainModal = signal(false);
+  blockchainLoan  = signal<Loan | null>(null);
 
   remaining = computed(() => {
     const l = this.repayingLoan();
@@ -247,6 +268,11 @@ export class BorrowerLoansComponent implements OnInit {
       next:  (s) => { this.schedule.set(s); this.schedLoading.set(false); },
       error: ()  => { this.schedLoading.set(false); },
     });
+  }
+
+  openBlockchain(l: Loan) {
+    this.blockchainLoan.set(l);
+    this.blockchainModal.set(true);
   }
 
   round(n: number) { return Math.round(n * 100) / 100; }

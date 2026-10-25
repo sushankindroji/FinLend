@@ -20,6 +20,7 @@ from app.services import credit_engine
 from app.services.blockchain_service import get_blockchain_service
 from app.services.risk_service import evaluate_borrower_risk
 from app.services.notification_service import emit_notification
+from app.services.realtime_service import get_realtime_service
 
 
 def _now():
@@ -53,13 +54,24 @@ def _assert_transition(current: str, target: str):
 
 
 async def _set_status(db: AsyncIOMotorDatabase, loan: dict, new_status: str, extra: Optional[dict] = None):
-    _assert_transition(loan["status"], new_status)
+    old_status = loan["status"]
+    _assert_transition(old_status, new_status)
     update = {"status": new_status, "updated_at": _now()}
     if extra:
         update.update(extra)
     await db.loans.update_one({"_id": loan["_id"]}, {"$set": update})
-    await _audit(db, "loan", str(loan["_id"]), f"STATUS_{loan['status']}_TO_{new_status}", extra or {})
+    await _audit(db, "loan", str(loan["_id"]), f"STATUS_{old_status}_TO_{new_status}", extra or {})
     loan.update(update)
+    
+    # Real-time status change broadcast
+    realtime = get_realtime_service()
+    await realtime.broadcast_loan_status_change(
+        loan_id=str(loan["_id"]),
+        old_status=old_status,
+        new_status=new_status,
+        borrower_id=str(loan.get("borrower_id", "")),
+    )
+    
     return loan
 
 
@@ -201,6 +213,17 @@ async def fund_loan(db: AsyncIOMotorDatabase, loan_id: str, lender: dict, amount
             loan = await _set_status(db, loan, "PARTIALLY_FUNDED")
 
     await _audit(db, "loan", str(loan["_id"]), "FUNDED_PARTIAL", {"lender_id": str(lender["_id"]), "amount": amount})
+
+    # Real-time updates
+    realtime = get_realtime_service()
+    await realtime.broadcast_funding_progress(
+        loan_id=str(loan["_id"]),
+        loan_amount=loan["amount"],
+        amount_funded=new_funded,
+        lender_id=str(lender["_id"]),
+        contribution=amount,
+        status=loan["status"],
+    )
 
     # Notifications
     borrower_id = str(loan.get("borrower_id", ""))
@@ -362,6 +385,16 @@ async def repay_loan(db: AsyncIOMotorDatabase, loan_id: str, borrower: dict, amo
     await _audit(db, "loan", str(loan["_id"]), "REPAYMENT_APPLIED", {
         "amount": amount, "new_score": new_score, "events": events,
     })
+
+    # Real-time repayment broadcast
+    realtime = get_realtime_service()
+    await realtime.broadcast_repayment(
+        loan_id=str(loan["_id"]),
+        borrower_id=str(borrower["_id"]),
+        amount=amount,
+        remaining=remaining_due - amount,
+        is_final=is_fully_repaid,
+    )
 
     # Notifications
     borrower_uid = str(borrower["_id"])

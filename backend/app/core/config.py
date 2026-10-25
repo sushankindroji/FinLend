@@ -36,12 +36,14 @@ class Settings(BaseSettings):
     block_explorer_base_url: str = ""
 
     # Voice
-    voice_provider: str = "demo"
-    openai_api_key: str = ""
-    google_tts_api_key: str = ""
+    voice_provider: str = "free"
+    groq_api_key: str = ""  # FREE API from groq.com
+    default_voice_language: str = "en"
+    supported_languages: str = "en,hi,te,ta"
 
     # ML
     model_path: str = "app/ml/artifacts/risk_model.joblib"
+    shap_explainer_path: str = "app/ml/artifacts/shap_explainer.joblib"
 
     @property
     def cors_origin_list(self) -> List[str]:

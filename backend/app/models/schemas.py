@@ -133,3 +133,60 @@ class VoiceResponse(BaseModel):
     reply_text: str
     audio_available: bool
     session_id: str
+
+
+# ---------------------------------------------------------------------------
+# EMI Calculator
+# ---------------------------------------------------------------------------
+class EMICalculationRequest(BaseModel):
+    principal: float = Field(gt=0, description="Loan amount")
+    annual_rate: float = Field(gt=0, lt=1, description="Annual interest rate (e.g., 0.10 for 10%)")
+    tenure_days: int = Field(gt=0, description="Loan tenure in days")
+    repayment_method: str = Field(default="reducing", pattern="^(reducing|flat|bullet)$")
+
+
+class EMIScheduleEntry(BaseModel):
+    installment_number: int
+    emi_amount: float
+    principal_component: float
+    interest_component: float
+    outstanding_balance: float
+    due_date_offset_days: int
+
+
+class EMICalculationResponse(BaseModel):
+    principal: float
+    interest_rate: float
+    tenure_months: int
+    tenure_days: int
+    repayment_method: str
+    emi_amount: float
+    total_interest: float
+    total_payment: float
+    schedule: List[EMIScheduleEntry]
+    effective_interest_rate: float
+    total_cost_ratio: float
+
+
+# ---------------------------------------------------------------------------
+# Voice / Multilingual
+# ---------------------------------------------------------------------------
+class EnhancedVoiceRequest(BaseModel):
+    """Request for enhanced multilingual voice processing."""
+    text: Optional[str] = None
+    audio_base64: Optional[str] = None
+    language: Optional[str] = "en"
+    session_id: Optional[str] = None
+
+
+class EnhancedVoiceResponse(BaseModel):
+    """Response from enhanced voice processing."""
+    transcript: str
+    detected_language: str
+    intent: str
+    entities: dict
+    reply_text: str
+    audio_base64: Optional[str] = None
+    audio_available: bool
+    session_id: str
+    context_maintained: bool = False

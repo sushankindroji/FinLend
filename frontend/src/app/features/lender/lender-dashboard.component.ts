@@ -1,11 +1,12 @@
 import {
-  Component, OnInit, signal, computed, ChangeDetectionStrategy
+  Component, OnInit, OnDestroy, signal, computed, ChangeDetectionStrategy
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { ApiService } from '../../core/services/api.service';
 import { ToastService } from '../../core/services/toast.service';
+import { RealtimeService } from '../../core/services/realtime.service';
 import { NavbarComponent } from '../../shared/components/navbar.component';
 import { StatusBadgeComponent } from '../../shared/components/status-badge.component';
 import { ProgressBarComponent } from '../../shared/components/progress-bar.component';
@@ -399,7 +400,7 @@ type DashTab = 'marketplace' | 'portfolio' | 'auto-invest';
     </div>
   `,
 })
-export class LenderDashboardComponent implements OnInit {
+export class LenderDashboardComponent implements OnInit, OnDestroy {
   me           = signal<User | null>(null);
   marketplace  = signal<Loan[]>([]);
   investments  = signal<Transaction[]>([]);
@@ -486,7 +487,11 @@ export class LenderDashboardComponent implements OnInit {
     return Math.max(4, (amount / maxAmt) * 96);
   }
 
-  constructor(private api: ApiService, private toast: ToastService) {}
+  constructor(
+    private api: ApiService,
+    private toast: ToastService,
+    private realtime: RealtimeService
+  ) {}
 
   ngOnInit() {
     this.refresh();
@@ -494,6 +499,17 @@ export class LenderDashboardComponent implements OnInit {
       next:  (p) => { this.prefs.set(p); this.prefsLoading.set(false); },
       error: ()  => { this.prefsLoading.set(false); },
     });
+
+    // Subscribe to real-time marketplace updates
+    this.realtime.subscribeToMarketplace((data) => {
+      console.log('[Marketplace] Real-time update:', data);
+      // Refresh marketplace when loans are funded/updated
+      this.refreshMarketplace();
+    });
+  }
+
+  ngOnDestroy() {
+    // Cleanup handled by service
   }
 
   refresh() {
@@ -502,14 +518,18 @@ export class LenderDashboardComponent implements OnInit {
 
     this.api.me().subscribe({ next: (u) => this.me.set(u), error: () => {} });
 
-    this.api.listLoans().subscribe({
-      next:  (ls) => { this.marketplace.set(ls); this.marketLoading.set(false); },
-      error: ()   => { this.marketLoading.set(false); },
-    });
+    this.refreshMarketplace();
 
     this.api.myTransactions().subscribe({
       next:  (txs) => { this.investments.set(txs.filter(t => t.type === 'FUNDING')); this.portfolioLoading.set(false); },
       error: ()    => { this.portfolioLoading.set(false); },
+    });
+  }
+
+  refreshMarketplace() {
+    this.api.listLoans().subscribe({
+      next:  (ls) => { this.marketplace.set(ls); this.marketLoading.set(false); },
+      error: ()   => { this.marketLoading.set(false); },
     });
   }
 

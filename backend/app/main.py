@@ -3,7 +3,7 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routers import admin, auth, loans, notifications, users, voice
+from app.api.routers import admin, auth, loans, notifications, users, voice, emi_calculator, explainability, enhanced_voice, blockchain
 from app.core.config import get_settings
 from app.db.mongodb import close_mongo_connection, connect_to_mongo
 
@@ -54,5 +54,9 @@ app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(loans.router)
 app.include_router(voice.router)
+app.include_router(enhanced_voice.router)
+app.include_router(emi_calculator.router)
+app.include_router(explainability.router)
+app.include_router(blockchain.router)
 app.include_router(admin.router)
 app.include_router(notifications.router)

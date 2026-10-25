@@ -150,6 +150,73 @@ export class ApiService {
     return this.http.post<RiskFlag>(`${BASE}/admin/flags`, payload);
   }
 
+  // ── Enhanced Voice (Multilingual) ──────────────────────
+  enhancedVoice(payload: {
+    text?: string;
+    audio_base64?: string;
+    language?: string;
+    session_id?: string;
+  }): Observable<any> {
+    return this.http.post<any>(`${BASE}/voice/enhanced/process`, payload);
+  }
+
+  // ── EMI Calculator ─────────────────────────────────────
+  calculateEMI(payload: {
+    principal: number;
+    annual_rate: number;
+    tenure_days: number;
+    repayment_method?: string;
+  }): Observable<any> {
+    return this.http.post<any>(`${BASE}/emi-calculator/calculate`, payload);
+  }
+
+  compareEMI(principal: number, tenureDays: number, rates?: string): Observable<any> {
+    let p = new HttpParams()
+      .set('principal', principal.toString())
+      .set('tenure_days', tenureDays.toString());
+    if (rates) p = p.set('rates', rates);
+    return this.http.get<any>(`${BASE}/emi-calculator/compare`, { params: p });
+  }
+
+  explainEMI(payload: {
+    principal: number;
+    annual_rate: number;
+    tenure_days: number;
+    repayment_method?: string;
+  }, language: string = 'en'): Observable<any> {
+    return this.http.post<any>(`${BASE}/emi-calculator/explain?language=${language}`, payload);
+  }
+
+  // ── AI Explainability ──────────────────────────────────
+  explainCreditScore(language: string = 'en'): Observable<any> {
+    return this.http.get<any>(`${BASE}/explainability/credit-score?language=${language}`);
+  }
+
+  explainLoanDecision(loanId: string, language: string = 'en'): Observable<any> {
+    return this.http.get<any>(`${BASE}/explainability/loan-decision/${loanId}?language=${language}`);
+  }
+
+  getCreditFactors(language: string = 'en'): Observable<any> {
+    return this.http.get<any>(`${BASE}/explainability/factors?language=${language}`);
+  }
+
+  // ── Blockchain ─────────────────────────────────────────
+  getTransaction(txHash: string): Observable<any> {
+    return this.http.get<any>(`${BASE}/blockchain/transaction/${txHash}`);
+  }
+
+  getLoanTransactions(loanId: string): Observable<any> {
+    return this.http.get<any>(`${BASE}/blockchain/loan/${loanId}/transactions`);
+  }
+
+  verifyLoan(loanId: string): Observable<any> {
+    return this.http.get<any>(`${BASE}/blockchain/verify/loan/${loanId}`);
+  }
+
+  blockchainStatus(): Observable<any> {
+    return this.http.get<any>(`${BASE}/blockchain/status`);
+  }
+
   resolveFlag(id: string): Observable<RiskFlag> {
     return this.http.patch<RiskFlag>(`${BASE}/admin/flags/${id}/resolve`, {});
   }
