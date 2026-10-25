@@ -346,42 +346,92 @@ class EnhancedVoiceService:
         return "UNKNOWN"
 
     def extract_entities(self, normalized_text: str, intent: str, language: str = "en") -> Dict:
-        """Extract entities like amounts, durations, etc."""
+        """
+        Extract entities like amounts, durations, etc.
+        NATURAL SPEECH UNDERSTANDING - handles mixed language, casual speech, English numbers in native language.
+        """
         entities: Dict = {}
+        text_lower = normalized_text.lower()
         
+        # ============= AMOUNT EXTRACTION (SMART) =============
+        # Extract ANY number that looks like a loan amount
+        # Handles: "5000", "5000 rupees", "5000 రుపీస్", "5000 रुपये", "५०००", etc.
         if intent in ("REQUEST_LOAN", "MAKE_REPAYMENT"):
-            pattern = AMOUNT_PATTERNS.get(language, AMOUNT_PATTERNS["en"])
-            for match in pattern.finditer(normalized_text):
-                raw = match.group(1).replace(",", "")
-                try:
-                    amount = float(raw)
-                except ValueError:
-                    continue
-                if amount >= 100:  # Ignore small incidental numbers
-                    entities["amount"] = amount
-                    break
+            # Multiple strategies to find amount
+            amount_patterns = [
+                r'(\d+(?:,\d{3})*(?:\.\d{2})?)\s*(?:rupees|rupee|rs|₹|रुपये|रुपया|రుపీస్|రూపాయల|ரூபாய்)',  # With currency
+                r'(?:loan|lend|borrow|उधार|లోన్|கடன்).*?(\d+(?:,\d{3})*)',  # After loan keywords
+                r'(\d+(?:,\d{3})*)\s*(?:का|కి|க்கு)',  # Before possessive markers
+                r'(\d{3,})',  # Any 3+ digit number (likely an amount)
+            ]
+            
+            for pattern_str in amount_patterns:
+                pattern = re.compile(pattern_str, re.IGNORECASE)
+                match = pattern.search(text_lower)
+                if match:
+                    raw = match.group(1).replace(",", "").strip()
+                    try:
+                        amount = float(raw)
+                        if amount >= 100:  # Reasonable loan minimum
+                            entities["amount"] = amount
+                            break
+                    except ValueError:
+                        continue
         
-        # Extract duration (in days or months)
-        duration_patterns = {
-            "en": re.compile(r"(?:for|in)\s*(\d+)\s*(days?|months?|weeks?)", re.IGNORECASE),
-            "hi": re.compile(r"(\d+)\s*(दिन|महीने|सप्ताह)", re.IGNORECASE),
-            "te": re.compile(r"(\d+)\s*(రోజులు|నెలలు|వారాలు)", re.IGNORECASE),
-            "ta": re.compile(r"(\d+)\s*(நாட்கள்|மாதங்கள்|வாரங்கள்)", re.IGNORECASE),
-        }
+        # ============= DURATION EXTRACTION (SUPER FLEXIBLE) =============
+        # Handles mixed language: "10 days", "10 డేస్", "10 రోజులు", "दस दिन", etc.
         
-        pattern = duration_patterns.get(language, duration_patterns["en"])
-        match = pattern.search(normalized_text)
+        # Strategy 1: English words (days, weeks, months) - works with Telugu/Hindi text too!
+        english_duration = re.compile(
+            r'(\d+)\s*(?:days?|weeks?|months?|డేస్|వీక్స్|మంత్స్)',  # Mixed Telugu-English
+            re.IGNORECASE
+        )
+        match = english_duration.search(text_lower)
         if match:
             value = int(match.group(1))
-            unit = match.group(2).lower()
+            unit = match.group(0).lower()
             
-            # Convert to days
-            if "month" in unit or "महीने" in unit or "నెలలు" in unit or "மாதங்கள்" in unit:
+            if 'month' in unit or 'మంత్స్' in unit:
                 entities["duration_days"] = value * 30
-            elif "week" in unit or "सप्ताह" in unit or "వారాలు" in unit or "வாரங்கள்" in unit:
+            elif 'week' in unit or 'వీక్స్' in unit:
                 entities["duration_days"] = value * 7
-            else:
+            else:  # days/డేస్
                 entities["duration_days"] = value
+        
+        # Strategy 2: Pure native language words
+        if "duration_days" not in entities:
+            native_patterns = {
+                "hi": re.compile(r'(\d+)\s*(?:दिन|महीने|सप्ताह|दिनों|महीनों)', re.IGNORECASE),
+                "te": re.compile(r'(\d+)\s*(?:రోజులు|రోజుల|నెలలు|నెలల|వారాలు|వారాల)', re.IGNORECASE),
+                "ta": re.compile(r'(\d+)\s*(?:நாட்கள்|மாதங்கள்|வாரங்கள்)', re.IGNORECASE),
+            }
+            
+            pattern = native_patterns.get(language)
+            if pattern:
+                match = pattern.search(normalized_text)
+                if match:
+                    value = int(match.group(1))
+                    unit = match.group(0).lower()
+                    
+                    # Convert to days
+                    if any(x in unit for x in ['महीने', 'నెలలు', 'நாட்கள்', 'month']):
+                        entities["duration_days"] = value * 30
+                    elif any(x in unit for x in ['सप्ताह', 'వారాలు', 'வாரங்கள்', 'week']):
+                        entities["duration_days"] = value * 7
+                    else:  # days
+                        entities["duration_days"] = value
+        
+        # Strategy 3: SMART FALLBACK - Look for "number + ki/కి/के लिए" pattern
+        # This handles: "10 కి", "30 దినాలకు", "60 के लिए"
+        if "duration_days" not in entities and "amount" in entities:
+            # Find any OTHER number in the sentence (not the amount)
+            all_numbers = re.findall(r'\b(\d+)\b', text_lower)
+            for num_str in all_numbers:
+                num = int(num_str)
+                # Reasonable duration range for microloans (7 days to 365 days)
+                if 7 <= num <= 365 and num != entities["amount"]:
+                    entities["duration_days"] = num
+                    break
         
         return entities
 

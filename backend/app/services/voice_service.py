@@ -49,6 +49,20 @@ VOICE_ASSISTANT_SYSTEM_PROMPT = """You are a voice assistant for FinLend, a peer
 - Confirm understanding before taking action
 - Respond in the user's language (match their input language)
 
+**CRITICAL: HANDLE NATURAL MIXED-LANGUAGE SPEECH**
+Users often mix languages naturally:
+- "నాకు 5000 రుపీస్ లోన్ కావాలి 10 డేస్ కి" (Telugu + English words)
+- "मुझे 5000 rupees loan चाहिए 30 days के लिए" (Hindi + English)
+- Numbers are often in English even in native language speech
+- Words like "days", "rupees", "loan" may be in English
+
+**Entity Extraction Rules:**
+1. Extract ANY number that looks like a loan amount (3+ digits)
+2. Extract ANY number that looks like duration (typically 7-365 days)
+3. Recognize mixed vocabulary: "డేస్"="days", "రుపీస్"="rupees", "లోన్"="loan"
+4. If you see TWO numbers, the larger is usually amount, smaller is duration
+5. Duration can be: days/డేస్/दिन, weeks/వీక్స్/सप्ताह, months/మంత్స్/महीने
+
 **Output Format (STRICT JSON):**
 {
   "intent": "REQUEST_LOAN|CHECK_BALANCE|CHECK_CREDIT_SCORE|CHECK_LOAN_STATUS|CHECK_REPAYMENT|MAKE_REPAYMENT|HELP|CLARIFY|GREETING|UNKNOWN",
@@ -63,12 +77,17 @@ VOICE_ASSISTANT_SYSTEM_PROMPT = """You are a voice assistant for FinLend, a peer
   "clarification_question": "<question to ask user if needs_clarification=true>"
 }
 
+**Examples of Natural Speech to Handle:**
+- "నాకు 5000 రుపీస్ లోన్ కావాలి 10 డేస్ కి" → amount: 5000, duration_days: 10
+- "मुझे 10000 का loan चाहिए 60 दिन के लिए" → amount: 10000, duration_days: 60
+- "I need 5k loan for 2 months" → amount: 5000, duration_days: 60
+- "3000 రూపాయల 15 రోజుల లోన్" → amount: 3000, duration_days: 15
+
 **Important:**
-- For loan requests, extract amount AND duration_days
-- If user says "5000 loan for 65 days", extract both values
-- If information is incomplete, ask clarifying questions
-- Be conversational, not robotic
-- Always respond in the same language the user spoke
+- Extract entities even from mixed-language casual speech
+- Be flexible with word order and phrasing
+- If unsure, ask for confirmation but include your best guess
+- Always respond in the same language the user spoke (or primary language used)
 """
 
 # DTMF keypad fallback
@@ -136,6 +155,9 @@ def groq_conversation(
         return _fallback_intent_detection(user_input)
     
     try:
+        # PRE-PROCESS: Extract entities ourselves as backup (Groq sometimes misses mixed language)
+        fallback_entities = _extract_entities_simple(user_input)
+        
         # Build conversation messages
         messages = [
             {"role": "system", "content": VOICE_ASSISTANT_SYSTEM_PROMPT}
@@ -154,6 +176,9 @@ def groq_conversation(
 - Balance: ₹{user_profile.get('balance', 0):,.0f}
 
 User says: "{user_input}"
+
+IMPORTANT: Extract ALL numbers you see. If there are 2 numbers, the larger is amount, smaller is days.
+Example: "నాకు 5000 రుపీస్ లోన్ కావాలి 10 డేస్ కి" should extract amount=5000, duration_days=10
 
 Respond in JSON format with intent, entities, and natural response in {language} language."""
         
@@ -180,10 +205,17 @@ Respond in JSON format with intent, entities, and natural response in {language}
         result = response.json()["choices"][0]["message"]["content"]
         result_json = json.loads(result)
         
+        # MERGE: Use fallback entities if Groq didn't extract them
+        entities = result_json.get("entities", {})
+        if not entities.get("amount") and fallback_entities.get("amount"):
+            entities["amount"] = fallback_entities["amount"]
+        if not entities.get("duration_days") and fallback_entities.get("duration_days"):
+            entities["duration_days"] = fallback_entities["duration_days"]
+        
         # Validate and normalize result
         return {
             "intent": result_json.get("intent", "UNKNOWN"),
-            "entities": result_json.get("entities", {}),
+            "entities": entities,
             "response": result_json.get("response", "मुझे समझ नहीं आया। कृपया फिर से बताएं।"),
             "needs_clarification": result_json.get("needs_clarification", False),
             "clarification_question": result_json.get("clarification_question", "")
@@ -194,30 +226,113 @@ Respond in JSON format with intent, entities, and natural response in {language}
         return _fallback_intent_detection(user_input)
 
 
+def _extract_entities_simple(text: str) -> dict:
+    """Simple entity extraction as backup for Groq."""
+    entities = {}
+    text_lower = text.lower()
+    
+    # Find all numbers
+    numbers = [int(n) for n in re.findall(r'\b(\d+)\b', text_lower)]
+    
+    if len(numbers) >= 2:
+        # Likely have both amount and duration
+        numbers_sorted = sorted(numbers, reverse=True)
+        entities["amount"] = float(numbers_sorted[0])
+        # Duration is typically 7-365 days
+        for num in numbers_sorted[1:]:
+            if 7 <= num <= 365:
+                entities["duration_days"] = num
+                break
+    elif len(numbers) == 1:
+        num = numbers[0]
+        # Guess based on magnitude
+        if num >= 1000:  # Likely amount
+            entities["amount"] = float(num)
+        elif 7 <= num <= 365:  # Likely duration
+            entities["duration_days"] = num
+    
+    return entities
+
+
 def _fallback_intent_detection(user_input: str) -> dict:
-    """Fallback to basic pattern matching if Groq fails."""
+    """
+    Fallback to basic pattern matching if Groq fails.
+    HANDLES MIXED LANGUAGE NATURAL SPEECH.
+    """
     text = user_input.lower()
     
-    # Basic patterns
-    amount_match = re.search(r'(\d+)\s*(?:rupees|rupee|rs|₹|रुपये|రూపాయలు)?', text)
-    days_match = re.search(r'(\d+)\s*(?:days?|दिन|రోజుల)?', text)
+    # Enhanced amount extraction - handles mixed language
+    amount_patterns = [
+        r'(\d+(?:,\d{3})*)\s*(?:rupees|rupee|rs|₹|रुपये|రుపీస్|రూపాయల)',
+        r'(\d{3,})',  # Any 3+ digit number
+    ]
+    
+    amount = None
+    for pattern_str in amount_patterns:
+        match = re.search(pattern_str, text)
+        if match:
+            try:
+                amount = float(match.group(1).replace(',', ''))
+                if amount >= 100:
+                    break
+            except:
+                continue
+    
+    # Enhanced duration extraction - handles "డేస్", "days", "రోజులు"
+    duration_days = None
+    
+    # Try multiple patterns
+    duration_patterns = [
+        r'(\d+)\s*(?:days?|డేస్|దినాలు|రోజులు|दिन|दिनों)',  # Mixed language days
+        r'(\d+)\s*(?:weeks?|వీక్స్|వారాలు|सप्ताह)',  # Weeks
+        r'(\d+)\s*(?:months?|మంత్స్|నెలలు|महीने)',  # Months
+        r'(\d+)\s*కి',  # Telugu possessive (number + ki)
+        r'(\d+)\s*के\s*लिए',  # Hindi (for)
+    ]
+    
+    for pattern_str in duration_patterns:
+        match = re.search(pattern_str, text, re.IGNORECASE)
+        if match:
+            value = int(match.group(1))
+            unit = match.group(0).lower()
+            
+            # Convert to days
+            if any(x in unit for x in ['month', 'మంత్స్', 'నెలలు', 'महीने']):
+                duration_days = value * 30
+            elif any(x in unit for x in ['week', 'వీక్స్', 'వారాలు', 'सप्ताह']):
+                duration_days = value * 7
+            else:
+                duration_days = value
+            break
+    
+    # SMART FALLBACK: If we have amount but no duration, find other number
+    if amount and not duration_days:
+        all_numbers = re.findall(r'\b(\d+)\b', text)
+        for num_str in all_numbers:
+            num = int(num_str)
+            # Reasonable duration range
+            if 7 <= num <= 365 and num != amount:
+                duration_days = num
+                break
     
     entities = {}
-    if amount_match:
-        entities["amount"] = float(amount_match.group(1))
-    if days_match:
-        entities["duration_days"] = int(days_match.group(1))
+    if amount:
+        entities["amount"] = amount
+    if duration_days:
+        entities["duration_days"] = duration_days
     
-    # Intent detection
-    if any(word in text for word in ["loan", "borrow", "need money", "मुझे पैसे चाहिए", "మुझे लोन", "లోన్", "उधार"]):
+    # Intent detection (flexible with mixed language)
+    loan_keywords = ["loan", "borrow", "need money", "ముझे पैसे चाहिए", "లోన్", "उधार", "కావాలి", "चाहिए"]
+    if any(word in text for word in loan_keywords):
+        needs_clarification = not (entities.get("amount") and entities.get("duration_days"))
         return {
             "intent": "REQUEST_LOAN",
             "entities": entities,
-            "response": "I'll help you with a loan. Please tell me the amount and duration." if not entities.get("amount") or not entities.get("duration_days") else f"Creating your loan for ₹{entities.get('amount', 0)} for {entities.get('duration_days', 0)} days.",
-            "needs_clarification": not (entities.get("amount") and entities.get("duration_days")),
-            "clarification_question": "How much amount and for how many days?" if not (entities.get("amount") and entities.get("duration_days")) else ""
+            "response": "I'll help you with a loan. Please tell me the amount and duration." if needs_clarification else f"Creating your loan for ₹{entities.get('amount', 0):.0f} for {entities.get('duration_days', 0)} days.",
+            "needs_clarification": needs_clarification,
+            "clarification_question": "How much amount and for how many days?" if needs_clarification else ""
         }
-    elif any(word in text for word in ["balance", "बैलेंस", "బ్యాలెన్స్", "खाता", "account"]):
+    elif any(word in text for word in ["balance", "బ్యాలెన్స్", "बैलेंस", "खाता", "account"]):
         return {
             "intent": "CHECK_BALANCE",
             "entities": {},
@@ -225,7 +340,7 @@ def _fallback_intent_detection(user_input: str) -> dict:
             "needs_clarification": False,
             "clarification_question": ""
         }
-    elif any(word in text for word in ["credit score", "score", "स्कोर", "స్కోర్", "rating", "रेटिंग"]):
+    elif any(word in text for word in ["credit score", "score", "స్కోర్", "स्कोर", "rating", "रेटिंग"]):
         return {
             "intent": "CHECK_CREDIT_SCORE",
             "entities": {},
