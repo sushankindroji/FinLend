@@ -44,7 +44,16 @@ class UserPublic(BaseModel):
     credit_score: Optional[int] = None
     borrowing_limit: Optional[float] = None
     lending_balance: Optional[float] = None
+    wallet_balance: Optional[float] = 0.0
+    gender: Optional[str] = None
+    age: Optional[int] = None
+    location: Optional[str] = None
     created_at: datetime
+
+
+class WalletAction(BaseModel):
+    amount: float = Field(gt=0, description="Amount to deposit or withdraw")
+
 
 
 # ---------------------------------------------------------------------------
@@ -124,6 +133,7 @@ class VoiceTextRequest(BaseModel):
     """Used both for real audio-derived text and for the DTMF/demo text path."""
     text: str
     session_id: Optional[str] = None
+    language: Optional[str] = "en"
 
 
 class VoiceResponse(BaseModel):
@@ -133,6 +143,13 @@ class VoiceResponse(BaseModel):
     reply_text: str
     audio_available: bool
     session_id: str
+    needs_clarification: Optional[bool] = False
+    clarification_question: Optional[str] = ""
+    action_taken: Optional[str] = None
+    end_call: Optional[bool] = False
+    data: Optional[dict] = None
+    language: Optional[str] = "en-IN"
+    use_browser_tts: Optional[bool] = True
 
 
 # ---------------------------------------------------------------------------

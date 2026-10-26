@@ -64,40 +64,45 @@ interface VerificationResult {
       <div *ngIf="!loading() && !error() && verification()" class="space-y-3 animate-fade-in">
         <!-- Status card -->
         <div
-          class="p-4 rounded-xl border"
+          class="p-4 rounded-xl border transition-all"
           [ngClass]="{
-            'border-success-500/30 bg-success-50 dark:bg-success-500/10': verification()!.loan_verified,
-            'border-warning-500/30 bg-warning-50 dark:bg-warning-500/10': !verification()!.loan_verified
+            'border-success-500/30 bg-success-50 dark:bg-success-500/10': verification()!.loan_verified && verification()!.transactions.length > 0,
+            'border-brand-500/30 bg-brand-50 dark:bg-brand-500/10': verification()!.transactions.length === 0,
+            'border-warning-500/30 bg-warning-50 dark:bg-warning-500/10': !verification()!.loan_verified && verification()!.transactions.length > 0
           }"
         >
           <div class="flex items-center gap-3 mb-2">
             <span class="text-2xl">
-              {{ verification()!.loan_verified ? '✅' : '⚠️' }}
+              {{ verification()!.transactions.length === 0 ? '⛓️' : (verification()!.loan_verified ? '✅' : '⚠️') }}
             </span>
             <div>
               <p class="font-semibold text-sm">
-                {{ verification()!.loan_verified ? 'Verified on Blockchain' : 'Verification Pending' }}
+                {{ verification()!.transactions.length === 0 ? 'Ready for On-Chain Transactions' : (verification()!.loan_verified ? 'Verified on Blockchain' : 'Verification Incomplete') }}
               </p>
               <p class="text-xs text-on-surface-muted">{{ verification()!.message }}</p>
             </div>
           </div>
 
           <!-- Chain mode badge -->
-          <div class="flex items-center gap-2 mt-3">
-            <span class="text-xs px-2 py-1 rounded-full bg-gray-100 dark:bg-white/10 font-mono">
+          <div class="flex items-center gap-2 mt-3 flex-wrap">
+            <span class="text-xs px-2.5 py-1 rounded-full bg-gray-100 dark:bg-white/10 font-mono font-medium">
               {{ verification()!.chain_mode }}
             </span>
             <span
               *ngIf="verification()!.on_chain"
-              class="text-xs px-2 py-1 rounded-full bg-brand-100 dark:bg-brand-500/20 text-brand-700 dark:text-brand-300"
+              class="text-xs px-2.5 py-1 rounded-full bg-brand-100 dark:bg-brand-500/20 text-brand-700 dark:text-brand-300 font-semibold flex items-center gap-1"
             >
-              🌐 On-Chain
+              <span class="w-2 h-2 rounded-full bg-brand-500 animate-pulse"></span>
+              🌐 Hardhat On-Chain (31337)
             </span>
             <span
               *ngIf="!verification()!.on_chain"
-              class="text-xs px-2 py-1 rounded-full bg-gray-100 dark:bg-white/10 text-on-surface-muted"
+              class="text-xs px-2.5 py-1 rounded-full bg-gray-100 dark:bg-white/10 text-on-surface-muted"
             >
               📋 Simulated
+            </span>
+            <span class="text-2xs text-on-surface-muted ml-auto font-mono">
+              Smart Contract: LoanRegistry.sol
             </span>
           </div>
         </div>
@@ -161,10 +166,13 @@ interface VerificationResult {
         <!-- No transactions -->
         <div
           *ngIf="!verification()!.transactions || verification()!.transactions.length === 0"
-          class="text-center py-6 text-sm text-on-surface-muted"
+          class="text-center py-6 text-sm text-on-surface-muted space-y-1.5 bg-gray-50/50 dark:bg-white/[0.02] rounded-xl p-4 border border-dashed border-gray-200 dark:border-white/10"
         >
-          <div class="text-4xl mb-2">📋</div>
-          <p>No blockchain transactions yet</p>
+          <div class="text-3xl mb-1">⏳</div>
+          <p class="font-medium text-on-surface">No blockchain transactions minted yet</p>
+          <p class="text-xs max-w-sm mx-auto text-on-surface-muted">
+            This loan is currently waiting for a lender to fund it. As soon as a lender funds this loan or a repayment is made, cryptographic proofs are permanently minted on the Hardhat Ethereum ledger.
+          </p>
         </div>
 
         <!-- Info notice -->
@@ -172,7 +180,7 @@ interface VerificationResult {
           <strong>Note:</strong> Blockchain verification provides immutable proof of all funding and repayment transactions.
           {{ verification()!.chain_mode === 'LOCAL_SIMULATION' ? 
              'Currently running in simulation mode. In production, all transactions would be recorded on a real blockchain network.' :
-             'All transactions are recorded on the blockchain and can be independently verified.' }}
+             'All transactions are recorded on the Hardhat Ethereum smart contract and can be independently verified.' }}
         </div>
       </div>
     </div>
@@ -212,7 +220,19 @@ export class BlockchainVerificationComponent implements OnInit {
     this.api.verifyLoan(this.loanId).subscribe({
       next: (res) => {
         this.loading.set(false);
-        this.verification.set(res);
+        const chain_mode = res.chain_mode || res.mode || 'ON_CHAIN';
+        const on_chain = res.on_chain !== undefined ? res.on_chain : (chain_mode === 'ON_CHAIN');
+        const transactions = res.transactions || (res.details ? [...(res.details.verified || []), ...(res.details.failed || [])] : []);
+        const hasTransactions = transactions.length > 0;
+        const loan_verified = res.loan_verified !== undefined ? res.loan_verified : (res.verified !== undefined ? res.verified : false);
+
+        this.verification.set({
+          loan_verified,
+          transactions,
+          on_chain,
+          chain_mode,
+          message: res.message || (hasTransactions ? 'All blockchain transactions verified on-chain.' : 'Awaiting initial funding transaction to record on-chain.'),
+        });
       },
       error: (err) => {
         this.loading.set(false);

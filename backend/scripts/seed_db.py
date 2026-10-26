@@ -57,8 +57,13 @@ async def seed_users(db, fake: Faker, rng: random.Random, n_borrowers: int, n_le
             "credit_score": score,
             "borrowing_limit": borrowing_limit_for_score(score),
             "lending_balance": None,
+            "wallet_balance": round(rng.uniform(2000, 10000), 2),
+            "gender": rng.choice(["male", "female"]),
+            "age": rng.randint(22, 60),
+            "location": rng.choice(["urban", "rural"]),
             "profile_archetype": profile,
             "stats": {
+
                 "completed_loans": 0, "on_time_repayments": 0, "late_repayments": 0,
                 "defaults": 0, "average_delay_days": 0.0, "total_borrowed": 0.0,
                 "total_repaid": 0.0, "avg_loan_duration": 30,

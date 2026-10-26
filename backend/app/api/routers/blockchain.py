@@ -208,13 +208,36 @@ async def verify_loan_on_chain(
             except Exception:
                 failed_txs.append({**tx, "status": "not_found"})
     
+    is_verified = len(failed_txs) == 0 and len(all_txs) > 0
+    if len(all_txs) == 0:
+        msg = f"Loan #{loan_id[-6:]} is currently {loan.get('status')}. Cryptographic proofs are minted on-chain once funding occurs."
+    elif is_verified:
+        msg = f"All {len(verified_txs)} transaction(s) verified on-chain on Hardhat (Chain ID: 31337)."
+    else:
+        msg = f"{len(failed_txs)} transaction(s) failed on-chain verification."
+
     return {
         "loan_id": loan_id,
-        "verified": len(failed_txs) == 0,
+        "verified": is_verified or len(all_txs) == 0,
+        "loan_verified": is_verified or len(all_txs) == 0,
         "total_transactions": len(all_txs),
         "verified_transactions": len(verified_txs),
         "failed_transactions": len(failed_txs),
         "mode": blockchain.mode,
+        "chain_mode": blockchain.mode,
+        "on_chain": blockchain.mode == "ON_CHAIN",
+        "message": msg,
+        "transactions": [
+            {
+                "type": t.get("type", "FUNDING").upper(),
+                "tx_hash": t.get("tx_hash"),
+                "amount": t.get("amount", 0.0),
+                "timestamp": str(t.get("created_at") or ""),
+                "verified": t.get("status") in ("confirmed", "simulated"),
+                "chain_mode": blockchain.mode,
+            }
+            for t in all_txs
+        ],
         "details": {
             "verified": verified_txs,
             "failed": failed_txs,

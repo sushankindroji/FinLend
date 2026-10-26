@@ -47,6 +47,7 @@ export interface User {
   credit_score?: number;
   borrowing_limit?: number;
   lending_balance?: number;
+  wallet_balance?: number;
   stats?: UserStats;
   created_at: string;
 }
@@ -208,10 +209,17 @@ export interface RiskFlag {
 export interface VoiceResponse {
   transcript: string;
   intent: string;
-  entities: Record<string, unknown>;
+  entities: Record<string, any>;
   reply_text: string;
   audio_available: boolean;
   session_id: string;
+  needs_clarification?: boolean;
+  clarification_question?: string;
+  action_taken?: string;
+  end_call?: boolean;
+  data?: any;
+  language?: string;
+  use_browser_tts?: boolean;
 }
 
 // ── Export ────────────────────────────────────────────────

@@ -1,13 +1,13 @@
-"""100% FREE voice layer - NO PAID APIs.
+"""100% FREE Voice Agent Layer - Powered by Groq Whisper & Groq LLMs.
 
 Pipeline:
-    Browser STT -> Groq LLM (FREE) -> Context Management -> Browser TTS
+    Browser Web Speech STT / Groq Whisper -> Groq AI Financial Agent -> Context & Execution -> Web Speech TTS / Audio
 
-FREE stack:
-  - Browser Web Speech API for STT (Hindi, Telugu, English) - FREE
-  - Groq API for conversational AI (FREE unlimited) - FREE
-  - Browser Web Speech API for TTS - FREE
-  - No OpenAI, no paid services
+100% Free Stack:
+  - Groq Whisper (whisper-large-v3-turbo) for audio transcription - FREE
+  - Browser Web Speech API for real-time live streaming STT (English, Hindi, Telugu) - FREE
+  - Groq API (openai/gpt-oss-120b & 20b) for autonomous multi-turn conversation & tool/action intent - FREE
+  - Browser SpeechSynthesis API for natural, zero-latency voice output - FREE
 """
 from __future__ import annotations
 
@@ -24,85 +24,77 @@ from app.core.config import get_settings
 # Conversation context storage
 _conversation_contexts: Dict[str, List[Dict[str, Any]]] = {}
 
-# Groq System prompt (FREE API, same quality as GPT-4)
-VOICE_ASSISTANT_SYSTEM_PROMPT = """You are a voice assistant for FinLend, a peer-to-peer micro-lending platform for rural and financially underserved users. Your role is to help users through voice conversations in their preferred language (English, Hindi, or Telugu).
+# Groq System prompt for autonomous Financial Voice Agent
+VOICE_ASSISTANT_SYSTEM_PROMPT = """You are FinLend's autonomous, conversational Voice Agent for peer-to-peer micro-lending.
+You speak naturally with borrowers and lenders in real-time, just like a helpful, friendly loan officer on a live phone call.
 
-**Your capabilities:**
-1. Help borrowers request loans (extract: amount, duration in days, purpose)
-2. Check credit scores and borrowing limits
-3. Check loan status and repayment schedules
-4. Guide through repayment process
-5. Provide balance information
-6. Answer questions about the platform
+You support English, Hindi, and Telugu (including mixed language speech like Hinglish/Tenglish).
 
-**User Profile Context (provided in each request):**
-- role: borrower or lender
-- credit_score: current score
-- borrowing_limit: maximum loan amount
-- lending_balance: available for lenders
+**Your core capabilities & actions:**
+1. REPAY_LOAN:
+   - Handle loan repayment requests (e.g. "I want to repay my loan", "pay 500 rupees", "repay in full", "clear my debt", "రుణం తిరిగి చెల్లించాలి", "लोन चुकाना है").
+   - Extract `amount` (number if specified) and `pay_all` (true if user says full, all, clear, everything).
+   - If user doesn't specify amount, ask them how much of their remaining balance they'd like to pay today.
+2. DEPOSIT_FUNDS:
+   - Add/deposit money into the user's bank wallet (e.g. "deposit 5000", "add 1000 rupees", "deposit money", "వాలెట్‌లో 1000 డిపాజిట్ చేయి", "5000 జమ కరో").
+   - Extract `amount` (number). If user doesn't mention amount, ask how much to deposit.
+3. WITHDRAW_FUNDS:
+   - Withdraw/transfer money from the user's bank wallet (e.g. "withdraw 2000", "withdraw money", "డబ్బులు విత్‌డ్రా చెయ్యి", "పैसे निकालो").
+   - Extract `amount` (number). If user doesn't mention amount, ask how much to withdraw.
+4. REQUEST_LOAN:
+   - Help borrowers apply for a microloan (extract `amount` in rupees, `duration_days` in days, `purpose`).
+   - If info is missing, ask for the missing piece.
+5. CHECK_LOAN_STATUS:
+   - Check user's active loans, amount owed, remaining balance, and repayment due dates.
+6. CHECK_BALANCE:
+   - Tell user their bank wallet balance, borrowing limit (if borrower), or lending balance (if lender).
+7. CHECK_CREDIT_SCORE:
+   - Check current credit score and explain how on-time repayments boost borrowing limits.
+8. CALCULATE_EMI:
+   - Calculate EMI or interest for a given amount and duration.
+9. END_CALL:
+   - If user says goodbye, bye, hang up, stop call, end call ("టాటా", "अलविदा", "కాల్ ఆపు", "ఫోన్ పెట్టేయ్"), acknowledge politely and set end_call: true.
+10. GREETING / GENERAL_QUERY:
+   - Answer platform questions warmly and concisely (1-2 sentences, suitable for speech).
 
-**Conversation Guidelines:**
-- Be warm, friendly, and patient
-- Speak simply for low-literacy users
-- Ask clarifying questions if information is incomplete
-- Extract specific details: loan amount (in rupees), duration (in days), purpose
-- Confirm understanding before taking action
-- Respond in the user's language (match their input language)
+**Live User Context (injected with each turn):**
+- Role, credit score, borrowing limit, bank wallet balance, and active loan details (amount, total due, remaining due, due date).
 
-**CRITICAL: HANDLE NATURAL MIXED-LANGUAGE SPEECH**
-Users often mix languages naturally:
-- "నాకు 5000 రుపీస్ లోన్ కావాలి 10 డేస్ కి" (Telugu + English words)
-- "मुझे 5000 rupees loan चाहिए 30 days के लिए" (Hindi + English)
-- Numbers are often in English even in native language speech
-- Words like "days", "rupees", "loan" may be in English
+**Conversation Style Guidelines:**
+- Speak like you are ON A PHONE CALL: natural, warm, crisp, and concise (1 to 2 spoken sentences).
+- Do NOT use long bullet points, markdown tables, or emojis in your speech response text.
+- If user wants to repay and you see an active loan in their profile, acknowledge their current remaining balance.
+- Respond in the user's spoken language.
 
-**Entity Extraction Rules:**
-1. Extract ANY number that looks like a loan amount (3+ digits)
-2. Extract ANY number that looks like duration (typically 7-365 days)
-3. Recognize mixed vocabulary: "డేస్"="days", "రుపీస్"="rupees", "లోన్"="loan"
-4. If you see TWO numbers, the larger is usually amount, smaller is duration
-5. Duration can be: days/డేస్/दिन, weeks/వీక్స్/सप्ताह, months/మంత్స్/महीने
-
-**Output Format (STRICT JSON):**
+**Output Format (STRICT JSON ONLY):**
 {
-  "intent": "REQUEST_LOAN|CHECK_BALANCE|CHECK_CREDIT_SCORE|CHECK_LOAN_STATUS|CHECK_REPAYMENT|MAKE_REPAYMENT|HELP|CLARIFY|GREETING|UNKNOWN",
+  "intent": "REPAY_LOAN|DEPOSIT_FUNDS|WITHDRAW_FUNDS|REQUEST_LOAN|CHECK_LOAN_STATUS|CHECK_BALANCE|CHECK_CREDIT_SCORE|CALCULATE_EMI|END_CALL|GREETING|HELP|GENERAL_QUERY",
   "entities": {
     "amount": <number or null>,
     "duration_days": <number or null>,
     "purpose": "<string or null>",
+    "pay_all": <true or false>,
     "language": "en|hi|te"
   },
-  "response": "<natural language response in user's language>",
-  "needs_clarification": <true if more info needed, false if ready to proceed>,
-  "clarification_question": "<question to ask user if needs_clarification=true>"
+  "response": "<natural, conversational spoken response for the user>",
+  "needs_clarification": <true if missing critical info for intent, false otherwise>,
+  "clarification_question": "<question to ask if needs_clarification=true>",
+  "end_call": <true if user wants to end/hang up the call, false otherwise>
 }
-
-**Examples of Natural Speech to Handle:**
-- "నాకు 5000 రుపీస్ లోన్ కావాలి 10 డేస్ కి" → amount: 5000, duration_days: 10
-- "मुझे 10000 का loan चाहिए 60 दिन के लिए" → amount: 10000, duration_days: 60
-- "I need 5k loan for 2 months" → amount: 5000, duration_days: 60
-- "3000 రూపాయల 15 రోజుల లోన్" → amount: 3000, duration_days: 15
-
-**Important:**
-- Extract entities even from mixed-language casual speech
-- Be flexible with word order and phrasing
-- If unsure, ask for confirmation but include your best guess
-- Always respond in the same language the user spoke (or primary language used)
 """
 
-# DTMF keypad fallback
 DTMF_INTENT_MAP = {
     "1": "CHECK_BALANCE",
     "2": "CHECK_CREDIT_SCORE",
     "3": "CHECK_LOAN_STATUS",
     "4": "REQUEST_LOAN",
     "5": "CHECK_REPAYMENT",
-    "6": "MAKE_REPAYMENT",
+    "6": "REPAY_LOAN",
     "0": "HELP",
 }
 
 
-def get_conversation_context(session_id: str, max_turns: int = 5) -> List[Dict[str, Any]]:
+def get_conversation_context(session_id: str, max_turns: int = 6) -> List[Dict[str, Any]]:
     """Retrieve recent conversation history for context."""
     return _conversation_contexts.get(session_id, [])[-max_turns:]
 
@@ -118,9 +110,45 @@ def update_conversation_context(session_id: str, user_input: str, assistant_resp
         "assistant": assistant_response
     })
     
-    # Keep only last 20 turns
     if len(_conversation_contexts[session_id]) > 20:
         _conversation_contexts[session_id] = _conversation_contexts[session_id][-20:]
+
+
+def transcribe_with_whisper(audio_bytes: bytes, filename: str = "audio.wav", language: Optional[str] = None) -> str:
+    """
+    Transcribe audio using Groq Whisper (whisper-large-v3-turbo) - 100% FREE tier.
+    """
+    settings = get_settings()
+    if not settings.groq_api_key:
+        return ""
+    
+    try:
+        files = {
+            "file": (filename, audio_bytes, "audio/wav")
+        }
+        data = {
+            "model": "whisper-large-v3-turbo",
+            "response_format": "json"
+        }
+        if language and language in ("en", "hi", "te", "ta"):
+            data["language"] = language
+
+        with httpx.Client(timeout=20.0) as client:
+            resp = client.post(
+                "https://api.groq.com/openai/v1/audio/transcriptions",
+                headers={"Authorization": f"Bearer {settings.groq_api_key}"},
+                files=files,
+                data=data
+            )
+            if resp.status_code == 200:
+                result = resp.json()
+                return result.get("text", "").strip()
+            else:
+                print(f"Whisper transcription failed with status {resp.status_code}: {resp.text}")
+    except Exception as e:
+        print(f"Whisper transcription exception: {e}")
+    
+    return ""
 
 
 def groq_conversation(
@@ -130,237 +158,298 @@ def groq_conversation(
     language: str = "en"
 ) -> dict:
     """
-    Use Groq FREE API for natural conversation and intent understanding.
-    Groq is FREE unlimited and as good as GPT-4.
-    
-    Args:
-        user_input: What the user said
-        user_profile: User's credit score, limits, balance, role
-        conversation_history: Recent conversation turns
-        language: Preferred language code
-    
-    Returns:
-        {
-            "intent": str,
-            "entities": dict,
-            "response": str,
-            "needs_clarification": bool,
-            "clarification_question": str
-        }
+    Groq Conversational Voice Agent.
+    Evaluates multi-turn context and extracts actions.
     """
     settings = get_settings()
     
     if not settings.groq_api_key:
-        # Fallback to basic pattern matching
-        return _fallback_intent_detection(user_input)
+        return _fallback_intent_detection(user_input, user_profile)
     
     try:
-        # PRE-PROCESS: Extract entities ourselves as backup (Groq sometimes misses mixed language)
         fallback_entities = _extract_entities_simple(user_input)
         
-        # Build conversation messages
-        messages = [
-            {"role": "system", "content": VOICE_ASSISTANT_SYSTEM_PROMPT}
-        ]
-        
-        # Add conversation history
-        for turn in conversation_history:
-            messages.append({"role": "user", "content": turn["user"]})
-            messages.append({"role": "assistant", "content": json.dumps(turn["assistant"])})
-        
-        # Add current user input with profile context
+        # Build active loans summary string
+        active_loans = user_profile.get("active_loans", [])
+        if active_loans:
+            loans_summary = "\n".join([
+                f"- Active Loan #{i+1}: Original: ₹{l.get('amount', 0):,.0f}, Total Due: ₹{l.get('total_due', 0):,.0f}, "
+                f"Remaining Due: ₹{l.get('remaining_due', 0):,.0f}, Status: {l.get('status')}"
+                for i, l in enumerate(active_loans)
+            ])
+        else:
+            loans_summary = "None (No outstanding loans)"
+
         user_message = f"""User Profile:
 - Role: {user_profile.get('role', 'borrower')}
 - Credit Score: {user_profile.get('credit_score', 'N/A')}
 - Borrowing Limit: ₹{user_profile.get('borrowing_limit', 0):,.0f}
-- Balance: ₹{user_profile.get('balance', 0):,.0f}
+- Active Loans:
+{loans_summary}
 
 User says: "{user_input}"
 
-IMPORTANT: Extract ALL numbers you see. If there are 2 numbers, the larger is amount, smaller is days.
-Example: "నాకు 5000 రుపీస్ లోన్ కావాలి 10 డేస్ కి" should extract amount=5000, duration_days=10
+Identify user's intent:
+- If user wants to repay loan or pay money -> REPAY_LOAN
+- If user asks for loan / borrow money -> REQUEST_LOAN
+- If user asks about their loan status or amount due -> CHECK_LOAN_STATUS
+- If user asks for credit score -> CHECK_CREDIT_SCORE
+- If user asks for limit / balance -> CHECK_BALANCE
+- If user says goodbye or hang up -> END_CALL
+- If user asks platform/financial question -> GENERAL_QUERY
 
-Respond in JSON format with intent, entities, and natural response in {language} language."""
+Output valid JSON only with keys: intent, entities (amount, duration_days, purpose, pay_all, language), response, needs_clarification, clarification_question, end_call."""
+
+        messages = [
+            {"role": "system", "content": VOICE_ASSISTANT_SYSTEM_PROMPT}
+        ]
+        
+        for turn in conversation_history:
+            messages.append({"role": "user", "content": turn["user"]})
+            messages.append({"role": "assistant", "content": json.dumps(turn["assistant"])})
         
         messages.append({"role": "user", "content": user_message})
         
-        # Call Groq FREE API
-        response = httpx.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {settings.groq_api_key}",
-                "Content-Type": "application/json"
-            },
-            json={
-                "model": "llama-3.3-70b-versatile",  # FREE, fast, excellent quality
-                "messages": messages,
-                "temperature": 0.7,
-                "max_tokens": 500,
-                "response_format": {"type": "json_object"}
-            },
-            timeout=30.0
-        )
+        models_to_try = ["openai/gpt-oss-120b", "openai/gpt-oss-20b"]
+        response = None
+        for model_name in models_to_try:
+            try:
+                response = httpx.post(
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {settings.groq_api_key}",
+                        "Content-Type": "application/json"
+                    },
+                    json={
+                        "model": model_name,
+                        "messages": messages,
+                        "temperature": 0.2,
+                        "max_tokens": 400,
+                        "response_format": {"type": "json_object"}
+                    },
+                    timeout=15.0
+                )
+                if response.status_code == 200:
+                    break
+            except Exception:
+                continue
+
+        if not response or response.status_code != 200:
+            return _fallback_intent_detection(user_input, user_profile)
+
+        result_content = response.json()["choices"][0]["message"]["content"]
+        result_json = json.loads(result_content)
         
-        response.raise_for_status()
-        result = response.json()["choices"][0]["message"]["content"]
-        result_json = json.loads(result)
-        
-        # MERGE: Use fallback entities if Groq didn't extract them
         entities = result_json.get("entities", {})
         if not entities.get("amount") and fallback_entities.get("amount"):
             entities["amount"] = fallback_entities["amount"]
         if not entities.get("duration_days") and fallback_entities.get("duration_days"):
             entities["duration_days"] = fallback_entities["duration_days"]
-        
-        # Validate and normalize result
+        if fallback_entities.get("pay_all"):
+            entities["pay_all"] = True
+
+        intent = result_json.get("intent", "GENERAL_QUERY").upper()
+
+        # Handle explicit keywords if Groq misclassified
+        text_lower = user_input.lower()
+        if any(w in text_lower for w in ["repay", "pay loan", "clear loan", "pay debt", "चुकाना", "भरना", "చెల్లించ", "కట్టాలి"]):
+            intent = "REPAY_LOAN"
+        elif any(w in text_lower for w in ["bye", "hang up", "end call", "stop call", "goodbye", "अलविदा", "కాల్ ఆపు", "ఫోన్ పెట్టు"]):
+            intent = "END_CALL"
+            result_json["end_call"] = True
+
         return {
-            "intent": result_json.get("intent", "UNKNOWN"),
+            "intent": intent,
             "entities": entities,
-            "response": result_json.get("response", "मुझे समझ नहीं आया। कृपया फिर से बताएं।"),
+            "response": result_json.get("response", "I am here to assist you with your loans."),
             "needs_clarification": result_json.get("needs_clarification", False),
-            "clarification_question": result_json.get("clarification_question", "")
+            "clarification_question": result_json.get("clarification_question", ""),
+            "end_call": result_json.get("end_call", False)
         }
         
     except Exception as e:
-        print(f"Groq API error: {e}")
-        return _fallback_intent_detection(user_input)
+        print(f"Groq API error in voice agent: {e}")
+        return _fallback_intent_detection(user_input, user_profile)
 
 
 def _extract_entities_simple(text: str) -> dict:
-    """Simple entity extraction as backup for Groq."""
+    """Robust regex-based entity extractor."""
     entities = {}
-    text_lower = text.lower()
-    
-    # Find all numbers
-    numbers = [int(n) for n in re.findall(r'\b(\d+)\b', text_lower)]
-    
-    if len(numbers) >= 2:
-        # Likely have both amount and duration
-        numbers_sorted = sorted(numbers, reverse=True)
-        entities["amount"] = float(numbers_sorted[0])
-        # Duration is typically 7-365 days
-        for num in numbers_sorted[1:]:
+    clean_text = re.sub(r'(\d+),(\d+)', r'\1\2', text.lower())
+
+    if any(w in clean_text for w in ["full", "entire", "all", "clear all", "पूरा", "మొత్తం"]):
+        entities["pay_all"] = True
+
+    # 1. 'k' notation (e.g. 5k -> 5000)
+    k_match = re.search(r'\b(\d+(?:\.\d+)?)\s*k\b', clean_text)
+    if k_match:
+        entities["amount"] = float(k_match.group(1)) * 1000
+
+    # 2. Duration in months, weeks, days
+    month_match = re.search(r'(\d+)\s*(?:months?|month|మంత్స్|నెలలు|महीने)', clean_text)
+    if month_match:
+        entities["duration_days"] = int(month_match.group(1)) * 30
+    else:
+        week_match = re.search(r'(\d+)\s*(?:weeks?|week|వీక్స్|వారాలు|सप्ताह)', clean_text)
+        if week_match:
+            entities["duration_days"] = int(week_match.group(1)) * 7
+        else:
+            day_match = re.search(r'(\d+)\s*(?:days?|day|డేస్|దినాలు|రోజులు|दिन|दिनों)', clean_text)
+            if day_match:
+                entities["duration_days"] = int(day_match.group(1))
+
+    # 3. Direct amount
+    if "amount" not in entities:
+        amt_match = re.search(r'(?:amount\s*(?:is|:|=)?\s*|rupees|rupee|rs\.?|₹|रुपये|రుపీస్|రూపాయల)\s*(\d+)', clean_text)
+        if not amt_match:
+            amt_match = re.search(r'(\d+)\s*(?:rupees|rupee|rs|₹|रुपये|రుపీస్|రూపాయల)', clean_text)
+        if amt_match:
+            try:
+                amt = float(amt_match.group(1))
+                if amt >= 50:
+                    entities["amount"] = amt
+            except Exception:
+                pass
+
+    # 4. Fallback: collect standalone numbers
+    all_numbers = [int(n) for n in re.findall(r'\b(\d+)\b', clean_text)]
+    if "duration_days" in entities:
+        dur_orig = entities["duration_days"]
+        for cand in [dur_orig, dur_orig // 30, dur_orig // 7]:
+            if cand in all_numbers:
+                all_numbers.remove(cand)
+
+    if "amount" not in entities and all_numbers:
+        for num in sorted(all_numbers, reverse=True):
+            if num >= 100:
+                entities["amount"] = float(num)
+                all_numbers.remove(num)
+                break
+
+    if "duration_days" not in entities and all_numbers:
+        for num in all_numbers:
             if 7 <= num <= 365:
                 entities["duration_days"] = num
                 break
-    elif len(numbers) == 1:
-        num = numbers[0]
-        # Guess based on magnitude
-        if num >= 1000:  # Likely amount
-            entities["amount"] = float(num)
-        elif 7 <= num <= 365:  # Likely duration
-            entities["duration_days"] = num
     
     return entities
 
 
-def _fallback_intent_detection(user_input: str) -> dict:
-    """
-    Fallback to basic pattern matching if Groq fails.
-    HANDLES MIXED LANGUAGE NATURAL SPEECH.
-    """
+def _fallback_intent_detection(user_input: str, user_profile: dict = None) -> dict:
+    """Robust fallback intent detection."""
     text = user_input.lower()
+    entities = _extract_entities_simple(user_input)
+    user_profile = user_profile or {}
     
-    # Enhanced amount extraction - handles mixed language
-    amount_patterns = [
-        r'(\d+(?:,\d{3})*)\s*(?:rupees|rupee|rs|₹|रुपये|రుపీస్|రూపాయల)',
-        r'(\d{3,})',  # Any 3+ digit number
-    ]
-    
-    amount = None
-    for pattern_str in amount_patterns:
-        match = re.search(pattern_str, text)
-        if match:
-            try:
-                amount = float(match.group(1).replace(',', ''))
-                if amount >= 100:
-                    break
-            except:
-                continue
-    
-    # Enhanced duration extraction - handles "డేస్", "days", "రోజులు"
-    duration_days = None
-    
-    # Try multiple patterns
-    duration_patterns = [
-        r'(\d+)\s*(?:days?|డేస్|దినాలు|రోజులు|दिन|दिनों)',  # Mixed language days
-        r'(\d+)\s*(?:weeks?|వీక్స్|వారాలు|सप्ताह)',  # Weeks
-        r'(\d+)\s*(?:months?|మంత్స్|నెలలు|महीने)',  # Months
-        r'(\d+)\s*కి',  # Telugu possessive (number + ki)
-        r'(\d+)\s*के\s*लिए',  # Hindi (for)
-    ]
-    
-    for pattern_str in duration_patterns:
-        match = re.search(pattern_str, text, re.IGNORECASE)
-        if match:
-            value = int(match.group(1))
-            unit = match.group(0).lower()
-            
-            # Convert to days
-            if any(x in unit for x in ['month', 'మంత్స్', 'నెలలు', 'महीने']):
-                duration_days = value * 30
-            elif any(x in unit for x in ['week', 'వీక్స్', 'వారాలు', 'सप्ताह']):
-                duration_days = value * 7
-            else:
-                duration_days = value
-            break
-    
-    # SMART FALLBACK: If we have amount but no duration, find other number
-    if amount and not duration_days:
-        all_numbers = re.findall(r'\b(\d+)\b', text)
-        for num_str in all_numbers:
-            num = int(num_str)
-            # Reasonable duration range
-            if 7 <= num <= 365 and num != amount:
-                duration_days = num
-                break
-    
-    entities = {}
-    if amount:
-        entities["amount"] = amount
-    if duration_days:
-        entities["duration_days"] = duration_days
-    
-    # Intent detection (flexible with mixed language)
-    loan_keywords = ["loan", "borrow", "need money", "ముझे पैसे चाहिए", "లోన్", "उधार", "కావాలి", "चाहिए"]
-    if any(word in text for word in loan_keywords):
-        needs_clarification = not (entities.get("amount") and entities.get("duration_days"))
+    # 1. Repayment intent
+    if any(w in text for w in ["repay", "pay loan", "clear loan", "pay debt", "चुकाना", "वापस", "చెల్లించ", "కట్టాలి"]):
+        has_amt = bool(entities.get("amount")) or bool(entities.get("pay_all"))
+        return {
+            "intent": "REPAY_LOAN",
+            "entities": entities,
+            "response": f"Processing your loan repayment of ₹{entities.get('amount', 'due amount')}." if has_amt else "How much would you like to repay towards your loan today?",
+            "needs_clarification": not has_amt,
+            "clarification_question": "How much amount do you want to repay?" if not has_amt else "",
+            "end_call": False
+        }
+
+    # 2. Deposit Funds
+    if any(w in text for w in ["deposit", "add money", "add balance", "top up", "జమా", "డిపాజిట్", "డబ్బులు వేయి", "जमा", "पैसे जोड़ें"]):
+        has_amt = bool(entities.get("amount"))
+        return {
+            "intent": "DEPOSIT_FUNDS",
+            "entities": entities,
+            "response": f"Depositing ₹{entities.get('amount'):,.0f} to your bank wallet." if has_amt else "How much amount would you like to deposit into your wallet?",
+            "needs_clarification": not has_amt,
+            "clarification_question": "How much amount do you want to deposit?" if not has_amt else "",
+            "end_call": False
+        }
+
+    # 3. Withdraw Funds
+    if any(w in text for w in ["withdraw", "take out", "transfer out", "విత్‌డ్రా", "డబ్బులు తీయి", "తీసుకో", "निकालो", "पैसे निकालें"]):
+        has_amt = bool(entities.get("amount"))
+        return {
+            "intent": "WITHDRAW_FUNDS",
+            "entities": entities,
+            "response": f"Withdrawing ₹{entities.get('amount'):,.0f} from your bank wallet." if has_amt else "How much amount would you like to withdraw from your wallet?",
+            "needs_clarification": not has_amt,
+            "clarification_question": "How much amount do you want to withdraw?" if not has_amt else "",
+            "end_call": False
+        }
+
+    # 4. End Call
+    if any(w in text for w in ["bye", "hang up", "end call", "goodbye", "अलविदा", "కాల్ ఆపు", "ఫోన్ పెట్టు"]):
+        return {
+            "intent": "END_CALL",
+            "entities": {},
+            "response": "Thank you for calling FinLend. Have a great day! Goodbye.",
+            "needs_clarification": False,
+            "clarification_question": "",
+            "end_call": True
+        }
+
+    # 3. Loan Status
+    if any(w in text for w in ["status", "active loan", "due date", "how much do i owe", "స్టేటస్", "బాకీ", "बकाया"]):
+        return {
+            "intent": "CHECK_LOAN_STATUS",
+            "entities": {},
+            "response": "Let me look up your active loan status and due date.",
+            "needs_clarification": False,
+            "clarification_question": "",
+            "end_call": False
+        }
+
+    # 4. Request Loan
+    loan_keywords = ["borrow", "need money", "take loan", "apply loan", "పैसे चाहिए", "లోన్ కావాలి", "ఉధార్"]
+    has_loan_info = bool(entities.get("amount")) and bool(entities.get("duration_days"))
+    if any(w in text for w in loan_keywords) or has_loan_info:
+        needs_clarification = not has_loan_info
+        if not needs_clarification:
+            resp = f"Creating your loan request for ₹{entities['amount']:,.0f} for {entities['duration_days']} days."
+        elif not entities.get("amount"):
+            resp = "How much loan amount do you need?"
+        else:
+            resp = f"Got ₹{entities['amount']:,.0f}. For how many days or months do you need it?"
+
         return {
             "intent": "REQUEST_LOAN",
             "entities": entities,
-            "response": "I'll help you with a loan. Please tell me the amount and duration." if needs_clarification else f"Creating your loan for ₹{entities.get('amount', 0):.0f} for {entities.get('duration_days', 0)} days.",
+            "response": resp,
             "needs_clarification": needs_clarification,
-            "clarification_question": "How much amount and for how many days?" if needs_clarification else ""
+            "clarification_question": "Please specify amount and duration." if needs_clarification else "",
+            "end_call": False
         }
-    elif any(word in text for word in ["balance", "బ్యాలెన్స్", "बैलेंस", "खाता", "account"]):
+
+    # 5. Balance / Limit
+    if any(w in text for w in ["balance", "limit", "బ్యాలెన్స్", "बैलेंस"]):
         return {
             "intent": "CHECK_BALANCE",
             "entities": {},
-            "response": "Let me check your balance.",
+            "response": "Let me check your borrowing limit and balance.",
             "needs_clarification": False,
-            "clarification_question": ""
+            "clarification_question": "",
+            "end_call": False
         }
-    elif any(word in text for word in ["credit score", "score", "స్కోర్", "स्कोर", "rating", "रेटिंग"]):
+
+    # 6. Credit Score
+    if any(w in text for w in ["credit score", "score", "స్కోర్", "स्कोर"]):
         return {
             "intent": "CHECK_CREDIT_SCORE",
             "entities": {},
             "response": "Let me check your credit score.",
             "needs_clarification": False,
-            "clarification_question": ""
+            "clarification_question": "",
+            "end_call": False
         }
-    
+
     return {
-        "intent": "UNKNOWN",
-        "entities": {},
-        "response": "I didn't understand. Can you please repeat?",
-        "needs_clarification": True,
-        "clarification_question": "How can I help you today?"
+        "intent": "GENERAL_QUERY",
+        "entities": entities,
+        "response": "I am your FinLend Voice Assistant. You can ask me to request a loan, repay your active loan, check your balance, or check your credit score.",
+        "needs_clarification": False,
+        "clarification_question": "",
+        "end_call": False
     }
-
-
-def transcribe_demo(text_payload: str) -> str:
-    """Browser handles STT, we just receive text."""
-    return text_payload.strip()
 
 
 def dtmf_to_text(digit: str) -> str:
@@ -377,6 +466,9 @@ class VoiceTurnResult:
     needs_clarification: bool
     clarification_question: str
     session_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    end_call: bool = False
+    action_taken: Optional[str] = None
+    data: Optional[dict] = None
 
 
 def process_voice_turn(
@@ -387,31 +479,25 @@ def process_voice_turn(
     user_profile: dict = None
 ) -> VoiceTurnResult:
     """
-    Process voice input using Groq FREE conversation.
-    
-    Args:
-        raw_input: Text string (browser handles audio)
-        session_id: Session identifier
-        is_audio: Ignored (browser handles audio)
-        language: Language code
-        user_profile: User's profile
+    Process voice input using Groq Free Whisper & Conversational AI.
     """
     if session_id is None:
         session_id = str(uuid.uuid4())
     
-    # Get text (browser already transcribed)
-    transcript = transcribe_demo(raw_input if isinstance(raw_input, str) else raw_input.decode('utf-8'))
+    if is_audio and isinstance(raw_input, bytes):
+        transcript = transcribe_with_whisper(raw_input, language=language)
+        if not transcript:
+            transcript = "Hello, I want help with my loan."
+    else:
+        transcript = raw_input if isinstance(raw_input, str) else raw_input.decode('utf-8', errors='ignore')
+        transcript = transcript.strip()
     
-    # Get conversation context
     conversation_history = get_conversation_context(session_id)
-    
-    # Use Groq FREE API for intelligent conversation
     if user_profile is None:
         user_profile = {}
     
     result = groq_conversation(transcript, user_profile, conversation_history, language)
     
-    # Create turn result
     turn_result = VoiceTurnResult(
         transcript=transcript,
         intent=result["intent"],
@@ -420,28 +506,18 @@ def process_voice_turn(
         needs_clarification=result["needs_clarification"],
         clarification_question=result["clarification_question"],
         session_id=session_id,
+        end_call=result.get("end_call", False)
     )
     
-    # Update conversation context
     update_conversation_context(session_id, transcript, result)
-    
     return turn_result
 
 
 def synthesize_reply(text: str, language: str = "en-IN") -> dict:
-    """
-    Return text for browser-based TTS (FREE).
-    
-    Args:
-        text: Text to synthesize
-        language: Language code (en-IN, hi-IN, te-IN)
-    
-    Returns:
-        Dict with text and language info for browser TTS
-    """
+    """Browser-based SpeechSynthesis metadata."""
     return {
         "text": text,
         "language": language,
-        "audio_available": True,  # Browser will handle TTS
+        "audio_available": True,
         "use_browser_tts": True
     }

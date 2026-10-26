@@ -52,19 +52,50 @@ class BlockchainService:
                 accounts = self.w3.eth.accounts
                 self.account = accounts[0] if accounts else None
 
-            if settings.contract_address and os.path.exists(_ARTIFACT_PATH):
-                with open(_ARTIFACT_PATH) as f:
+            # Auto-discover deployed address from /blockchain/deployed-address.json if not set in env
+            contract_address = settings.contract_address
+            candidate_address_files = [
+                "/blockchain/deployed-address.json",
+                os.path.join(os.path.dirname(__file__), "..", "..", "..", "blockchain", "deployed-address.json"),
+            ]
+            if not contract_address:
+                for af in candidate_address_files:
+                    if os.path.exists(af):
+                        try:
+                            with open(af) as f:
+                                data = json.load(f)
+                                contract_address = data.get("address")
+                                if contract_address:
+                                    logger.info("Auto-discovered contract address %s from %s", contract_address, af)
+                                    break
+                        except Exception as e:
+                            logger.warning("Could not read address file %s: %e", af, e)
+
+            # Auto-discover artifact path
+            candidate_artifacts = [
+                "/blockchain/artifacts/contracts/LoanRegistry.sol/LoanRegistry.json",
+                _ARTIFACT_PATH,
+            ]
+            artifact_file = None
+            for art in candidate_artifacts:
+                if os.path.exists(art):
+                    artifact_file = art
+                    break
+
+            if contract_address and artifact_file:
+                with open(artifact_file) as f:
                     artifact = json.load(f)
                 self.contract = self.w3.eth.contract(
-                    address=Web3.to_checksum_address(settings.contract_address),
+                    address=Web3.to_checksum_address(contract_address),
                     abi=artifact["abi"],
                 )
                 self.mode = "ON_CHAIN"
-                logger.info("Blockchain service connected in ON_CHAIN mode at %s", settings.web3_provider_uri)
+                logger.info("Blockchain service connected in ON_CHAIN mode at %s (contract: %s)", settings.web3_provider_uri, contract_address)
             else:
                 self.mode = "LOCAL_SIMULATION"
                 logger.warning(
-                    "Contract address/artifact not found -- falling back to LOCAL_SIMULATION mode"
+                    "Contract address (%s) or artifact (%s) not found -- falling back to LOCAL_SIMULATION mode",
+                    contract_address, artifact_file
                 )
         except Exception as exc:  # noqa: BLE001
             logger.warning("Blockchain unreachable (%s). Falling back to LOCAL_SIMULATION mode.", exc)

@@ -12,6 +12,20 @@ import { ToastContainerComponent } from '../../shared/components/toast-container
   imports:[CommonModule,FormsModule,RouterLink,LoadingSpinnerComponent,ToastContainerComponent],
   template:`
     <app-toast-container></app-toast-container>
+    
+    <!-- Theme Toggle Button (Top Right) -->
+    <button 
+      class="theme-toggle-btn"
+      (click)="toggleTheme()"
+      [attr.aria-label]="isDark() ? 'Switch to light mode' : 'Switch to dark mode'">
+      <svg *ngIf="!isDark()" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>
+      </svg>
+      <svg *ngIf="isDark()" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+      </svg>
+    </button>
+    
     <main class="auth-shell">
       <div class="auth-ambient auth-ambient-a"></div><div class="auth-ambient auth-ambient-b"></div>
       <section class="auth-showcase">
@@ -60,6 +74,7 @@ import { ToastContainerComponent } from '../../shared/components/toast-container
     </main>
   `,
   styles:[`
+    .theme-toggle-btn{position:fixed;top:20px;right:20px;z-index:100;width:44px;height:44px;border-radius:12px;border:1px solid var(--fl-border-soft);background:rgba(255,255,255,.8);backdrop-filter:blur(10px);color:var(--fl-on-surface);display:grid;place-items:center;cursor:pointer;transition:all .2s ease;box-shadow:0 4px 12px rgba(0,0,0,.05)}:host-context(.dark) .theme-toggle-btn{background:rgba(255,255,255,.08)}.theme-toggle-btn:hover{transform:translateY(-2px);border-color:var(--fl-brand);box-shadow:0 6px 16px rgba(53,103,246,.15)}
     .auth-shell{min-height:100dvh;display:grid;grid-template-columns:1.05fr .95fr;position:relative;overflow:hidden;background:var(--fl-bg)}
     .auth-showcase{display:flex;align-items:center;padding:7vh clamp(36px,6vw,100px);position:relative;overflow:hidden;background:linear-gradient(145deg,rgba(232,238,255,.92),rgba(248,246,255,.68))}
     :host-context(.dark) .auth-showcase{background:linear-gradient(145deg,#0d1426,#101524)}
@@ -78,6 +93,7 @@ export class LoginComponent {
   emailTouched = false;
   pwTouched = false;
   loading = signal(false);
+  isDark = signal(false);
 
   demoAccounts = [
     { label: 'Borrower', icon: '🙋', email: 'borrower1@demo.finlend.test', password: 'Password123!' },
@@ -89,7 +105,23 @@ export class LoginComponent {
     private auth: AuthService,
     private toast: ToastService,
     private router: Router,
-  ) {}
+  ) {
+    // Check current theme on init
+    this.isDark.set(document.documentElement.classList.contains('dark'));
+  }
+
+  toggleTheme() {
+    const html = document.documentElement;
+    if (html.classList.contains('dark')) {
+      html.classList.remove('dark');
+      localStorage.setItem('theme', 'light');
+      this.isDark.set(false);
+    } else {
+      html.classList.add('dark');
+      localStorage.setItem('theme', 'dark');
+      this.isDark.set(true);
+    }
+  }
 
   fillDemo(demo: { email: string; password: string }) {
     this.email = demo.email;

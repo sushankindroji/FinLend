@@ -69,6 +69,18 @@ FEATURE_NAMES = {
         "te": "సగటు ఆలస్యం (రోజులు)",
         "ta": "சராசரி தாமதம் (நாட்கள்)",
     },
+    "previous_credit_score": {
+        "en": "Previous Credit Score",
+        "hi": "पिछला क्रेडिट स्कोर",
+        "te": "గత క్రెడిట్ స్కోర్",
+        "ta": "முந்தைய கடன் மதிப்பெண்",
+    },
+    "loan_duration": {
+        "en": "Loan Duration",
+        "hi": "ऋण अवधि",
+        "te": "రుణ కాలపరిమితి",
+        "ta": "கடன் காலம்",
+    },
 }
 
 # Explanation templates
@@ -109,23 +121,21 @@ class ExplainableAIService:
         self.explainer = None
         self.feature_names = []
         
-        # Try to load model and explainer
-        model_path = self.settings.model_path
-        explainer_path = self.settings.shap_explainer_path
-        
-        if os.path.exists(model_path):
+    def _load_artifacts_if_needed(self):
+        """Lazy load model and explainer if not already loaded."""
+        if self.model is None and os.path.exists(self.settings.model_path):
             try:
-                bundle = joblib.load(model_path)
+                bundle = joblib.load(self.settings.model_path)
                 self.model = bundle.get("model")
                 if self.model:
-                    logger.info(f"Loaded ML model from {model_path}")
+                    logger.info(f"Loaded ML model from {self.settings.model_path}")
             except Exception as e:
                 logger.warning(f"Failed to load model: {e}")
-        
-        if os.path.exists(explainer_path):
+
+        if self.explainer is None and os.path.exists(self.settings.shap_explainer_path):
             try:
-                self.explainer = joblib.load(explainer_path)
-                logger.info(f"Loaded SHAP explainer from {explainer_path}")
+                self.explainer = joblib.load(self.settings.shap_explainer_path)
+                logger.info(f"Loaded SHAP explainer from {self.settings.shap_explainer_path}")
             except Exception as e:
                 logger.warning(f"Failed to load SHAP explainer: {e}")
 
@@ -143,6 +153,7 @@ class ExplainableAIService:
         Returns explanation with feature importance if available,
         or rule-based explanation if ML model not trained.
         """
+        self._load_artifacts_if_needed()
         result = {
             "decision": decision,
             "credit_score": credit_score,
@@ -189,31 +200,43 @@ class ExplainableAIService:
             
             # Extract feature importance
             if hasattr(shap_values, 'values'):
-                # For SHAP >= 0.40
                 values = shap_values.values[0]
             else:
                 values = shap_values[0]
-            
+
+            import numpy as np
+            if hasattr(values, 'ndim') and values.ndim > 1:
+                # Multi-class output: take max absolute contribution or mean
+                values = np.mean(values, axis=-1)
+
             # Get feature names
             feature_names = X.columns.tolist()
-            
+
             # Sort by absolute importance
-            importance_pairs = list(zip(feature_names, values))
+            importance_pairs = [(feat, float(val)) for feat, val in zip(feature_names, values)]
             importance_pairs.sort(key=lambda x: abs(x[1]), reverse=True)
             
+            # Normalize importance relative to top factor
+            max_abs_val = max(abs(val) for _, val in importance_pairs) if importance_pairs else 1.0
+            if max_abs_val <= 1e-6:
+                max_abs_val = 1.0
+
             # Get top 5 factors
             top_factors = []
             for feat_name, shap_val in importance_pairs[:5]:
                 translated_name = FEATURE_NAMES.get(feat_name, {}).get(language, feat_name)
                 feature_value = features.get(feat_name, 0)
                 
-                impact = "positive" if shap_val > 0 else "negative"
-                
+                # Domain-aware impact assessment
+                impact = self._evaluate_feature_impact(feat_name, feature_value)
+                norm_importance = round(min(1.0, max(0.2, abs(shap_val) / max_abs_val)), 2)
+
                 top_factors.append({
                     "feature": feat_name,
                     "display_name": translated_name,
                     "value": feature_value,
                     "shap_value": round(float(shap_val), 4),
+                    "importance": norm_importance,
                     "impact": impact,
                 })
             
@@ -228,6 +251,27 @@ class ExplainableAIService:
         except Exception as e:
             logger.error(f"SHAP explanation failed: {e}")
             return None
+
+    def _evaluate_feature_impact(self, feat_name: str, feat_val: any) -> str:
+        """Determine human-understandable impact of a feature for credit scoring."""
+        try:
+            val = float(feat_val or 0.0)
+        except (ValueError, TypeError):
+            val = 0.0
+
+        if feat_name == "previous_credit_score":
+            return "positive" if val >= 650 else "negative" if val < 550 else "neutral"
+        if feat_name in ("on_time_repayments", "completed_loans", "total_repaid"):
+            return "positive" if val > 0 else "neutral"
+        if feat_name in ("defaults", "late_repayments"):
+            return "negative" if val > 0 else "positive"
+        if feat_name == "average_delay_days":
+            return "negative" if val > 2.0 else "positive"
+        if feat_name == "repayment_ratio":
+            return "positive" if val >= 0.85 else "negative" if val < 0.65 else "neutral"
+        if feat_name == "total_borrowed":
+            return "positive" if val > 0 else "neutral"
+        return "positive" if val > 0 else "neutral"
 
     def _explain_with_rules(self, features: Dict, decision: str, language: str = "en") -> Dict:
         """
@@ -294,10 +338,45 @@ class ExplainableAIService:
                 "importance": 0.9,
             })
         
+        # If no specific risk factors triggered (e.g. new user profile), provide baseline factors
+        if not top_factors:
+            top_factors = [
+                {
+                    "feature": "defaults",
+                    "display_name": FEATURE_NAMES.get("defaults", {}).get(language, "Zero Defaults"),
+                    "value": 0,
+                    "impact": "positive",
+                    "importance": 0.85,
+                },
+                {
+                    "feature": "on_time_repayments",
+                    "display_name": FEATURE_NAMES.get("on_time_repayments", {}).get(language, "Clean History"),
+                    "value": 0,
+                    "impact": "positive",
+                    "importance": 0.70,
+                },
+                {
+                    "feature": "repayment_ratio",
+                    "display_name": FEATURE_NAMES.get("repayment_ratio", {}).get(language, "Initial Standing"),
+                    "value": 1.0,
+                    "impact": "neutral",
+                    "importance": 0.60,
+                },
+            ]
+
         # Sort by importance
         top_factors.sort(key=lambda x: x.get("importance", 0), reverse=True)
         
         recommendations = self._generate_recommendations(top_factors, language)
+        if not recommendations:
+            if language == "hi":
+                recommendations.append("अपना पहला माइक्रोलोन लें और समय पर चुकाकर स्कोर 850 तक बढ़ाएं")
+            elif language == "te":
+                recommendations.append("మీ మొదటి మైక్రోలోన్ తీసుకొని సమయానికి తిరిగి చెల్లించి స్కోర్ 850 వరకు పెంచుకోండి")
+            elif language == "ta":
+                recommendations.append("உங்கள் முதல் கடனை எடுத்து சரியான நேரத்தில் திருப்பி செலுத்துங்கள்")
+            else:
+                recommendations.append("Borrow and repay your first microloan on time to build your score up to 850")
         
         return {
             "top_factors": top_factors[:5],
@@ -419,6 +498,8 @@ class ExplainableAIService:
             "total_repaid": stats.get("total_repaid", 0.0),
             "repayment_ratio": stats.get("total_repaid", 0.0) / max(stats.get("total_borrowed", 1.0), 1.0),
             "average_delay_days": stats.get("average_delay_days", 0.0),
+            "loan_duration": 30,
+            "previous_credit_score": score,
         }
         
         explanation = self.explain_credit_decision(

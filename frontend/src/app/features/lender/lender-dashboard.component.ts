@@ -17,6 +17,8 @@ import type { User, Loan, Transaction, AutoInvestPrefs } from '../../core/models
 
 type DashTab = 'marketplace' | 'portfolio' | 'auto-invest';
 
+import { BlockchainVerificationComponent } from '../../shared/components/blockchain-verification.component';
+
 @Component({
   selector: 'app-lender-dashboard',
   standalone: true,
@@ -25,6 +27,7 @@ type DashTab = 'marketplace' | 'portfolio' | 'auto-invest';
     CommonModule, FormsModule, RouterLink,
     NavbarComponent, StatusBadgeComponent, ProgressBarComponent,
     LoadingSpinnerComponent, EmptyStateComponent, ModalComponent,
+    BlockchainVerificationComponent,
   ],
   template: `
     <app-navbar></app-navbar>
@@ -121,6 +124,10 @@ type DashTab = 'marketplace' | 'portfolio' | 'auto-invest';
                 <p class="text-xs text-on-surface-muted mt-0.5">
                   {{ l.borrower_name ?? 'Anonymous' }} · {{ l.purpose || 'General' }}
                 </p>
+                <button type="button" class="text-2xs text-brand-600 dark:text-brand-400 hover:underline flex items-center gap-1 mt-1 font-medium"
+                        (click)="openBlockchain(l.id)">
+                  🔗 On-Chain Proof
+                </button>
               </div>
               <div class="flex flex-col gap-1 items-end">
                 <app-status-badge [value]="l.status" type="status"></app-status-badge>
@@ -266,7 +273,14 @@ type DashTab = 'marketplace' | 'portfolio' | 'auto-invest';
                     ₹{{ tx.expected_return | number:'1.2-2' }}
                   </td>
                   <td class="table-td">
-                    <span class="font-mono text-2xs text-on-surface-muted max-w-[120px] truncate block"
+                    <button *ngIf="tx.loan_id"
+                            type="button"
+                            class="font-mono text-2xs text-brand-600 dark:text-brand-400 hover:underline max-w-[120px] truncate block text-left"
+                            [title]="tx.tx_hash"
+                            (click)="openBlockchain(tx.loan_id)">
+                      🔗 {{ tx.tx_hash ? tx.tx_hash.slice(0, 10) + '…' : 'Verify' }}
+                    </button>
+                    <span *ngIf="!tx.loan_id" class="font-mono text-2xs text-on-surface-muted max-w-[120px] truncate block"
                           [title]="tx.tx_hash">
                       {{ tx.tx_hash ? tx.tx_hash.slice(0, 14) + '…' : '—' }}
                     </span>
@@ -398,12 +412,26 @@ type DashTab = 'marketplace' | 'portfolio' | 'auto-invest';
       </div>
 
     </div>
+
+    <!-- ══ BLOCKCHAIN VERIFICATION MODAL ═══════════════════════════════ -->
+    <app-modal
+      [open]="blockchainModal()"
+      title="Blockchain Verification & Cryptographic Proof"
+      [subtitle]="selectedLoanId() ? 'Loan #' + selectedLoanId()!.slice(-6) : ''"
+      (close)="blockchainModal.set(false)"
+    >
+      <div *ngIf="selectedLoanId()" class="p-2">
+        <app-blockchain-verification [loanId]="selectedLoanId()!"></app-blockchain-verification>
+      </div>
+    </app-modal>
   `,
 })
 export class LenderDashboardComponent implements OnInit, OnDestroy {
   me           = signal<User | null>(null);
   marketplace  = signal<Loan[]>([]);
   investments  = signal<Transaction[]>([]);
+  blockchainModal = signal(false);
+  selectedLoanId  = signal<string | null>(null);
   prefs        = signal<AutoInvestPrefs>({
     enabled: false,
     max_per_loan: 1000,
@@ -601,5 +629,10 @@ export class LenderDashboardComponent implements OnInit, OnDestroy {
       },
       error: () => this.toast.error('Export failed', 'Could not generate CSV export'),
     });
+  }
+
+  openBlockchain(loanId: string) {
+    this.selectedLoanId.set(loanId);
+    this.blockchainModal.set(true);
   }
 }

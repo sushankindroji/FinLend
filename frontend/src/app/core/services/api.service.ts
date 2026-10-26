@@ -93,11 +93,27 @@ export class ApiService {
   }
 
   // ── Voice ──────────────────────────────────────────────
-  voiceTurn(text: string, sessionId?: string): Observable<VoiceResponse> {
+  voiceTurn(text: string, sessionId?: string, language: string = 'en'): Observable<VoiceResponse> {
     return this.http.post<VoiceResponse>(`${BASE}/voice/turn`, {
       text,
       session_id: sessionId,
+      language,
     });
+  }
+
+  voiceAudio(audioBlob: Blob, language: string = 'en', sessionId?: string): Observable<VoiceResponse> {
+    const formData = new FormData();
+    formData.append('audio', audioBlob, 'speech.wav');
+    formData.append('language', language);
+    if (sessionId) formData.append('session_id', sessionId);
+    return this.http.post<VoiceResponse>(`${BASE}/voice/audio`, formData);
+  }
+
+  transcribeWhisper(audioBlob: Blob, language: string = 'en'): Observable<{ text: string }> {
+    const formData = new FormData();
+    formData.append('audio', audioBlob, 'speech.wav');
+    formData.append('language', language);
+    return this.http.post<{ text: string }>(`${BASE}/voice/transcribe-whisper`, formData);
   }
 
   dtmfTurn(digit: string, sessionId?: string): Observable<VoiceResponse> {
@@ -220,4 +236,23 @@ export class ApiService {
   resolveFlag(id: string): Observable<RiskFlag> {
     return this.http.patch<RiskFlag>(`${BASE}/admin/flags/${id}/resolve`, {});
   }
+
+  // ── Wallet / Bank Balance ───────────────────────────────
+  depositWallet(amount: number): Observable<{ status: string; balance: number; wallet_balance: number; field: string }> {
+    return this.http.post<any>(`${BASE}/users/me/deposit`, { amount });
+  }
+
+  withdrawWallet(amount: number): Observable<{ status: string; balance: number; wallet_balance: number; field: string }> {
+    return this.http.post<any>(`${BASE}/users/me/withdraw`, { amount });
+  }
+
+  // ── Admin Overdue & Fairness Testing ────────────────────
+  detectOverdueLoans(): Observable<any> {
+    return this.http.post<any>(`${BASE}/admin/loans/detect-overdue`, {});
+  }
+
+  getFairnessAudit(): Observable<any> {
+    return this.http.get<any>(`${BASE}/admin/ml/fairness`);
+  }
 }
+

@@ -30,6 +30,7 @@ async def register(payload: UserRegister, db: AsyncIOMotorDatabase = Depends(get
         "credit_score": initial_score if payload.role.value == "borrower" else None,
         "borrowing_limit": borrowing_limit_for_score(initial_score) if payload.role.value == "borrower" else None,
         "lending_balance": 50000.0 if payload.role.value == "lender" else None,
+        "wallet_balance": 1000.0 if payload.role.value == "borrower" else None,
         "stats": {},
         "created_at": datetime.now(timezone.utc),
     }

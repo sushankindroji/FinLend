@@ -12,9 +12,8 @@ venv/
 # ── Backend secrets & generated artifacts ─────────────────────────────────
 .env
 backend/.env
-backend/app/ml/artifacts/*.joblib
-backend/app/ml/artifacts/*.csv
-backend/app/ml/artifacts/metrics.json
+backend/app/ml/artifacts/*
+!backend/app/ml/artifacts/.gitkeep
 
 # ── Node / Angular ─────────────────────────────────────────────────────────
 node_modules/

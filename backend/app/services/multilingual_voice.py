@@ -518,16 +518,18 @@ class EnhancedVoiceService:
                 else:
                     return f"Your available lending balance is ₹{bal:,.2f}."
             
+            wallet_bal = borrower.get("wallet_balance", 0.0) or 0.0
             credit_score = borrower.get("credit_score", 500)
             limit = borrower.get("borrowing_limit", 2000)
             if language == "hi":
-                return f"आपका क्रेडिट स्कोर {credit_score} है और उधार लेने की सीमा ₹{limit:,.0f} है।"
+                return f"आपका वॉलेट बैलेंस ₹{wallet_bal:,.2f} है, क्रेडिट स्कोर {credit_score} और उधार सीमा ₹{limit:,.0f} है।"
             elif language == "te":
-                return f"మీ క్రెడిట్ స్కోర్ {credit_score} మరియు రుణం తీసుకునే పరిమితి ₹{limit:,.0f}."
+                return f"మీ వాలెట్ బ్యాలెన్స్ ₹{wallet_bal:,.2f}, క్రెడిట్ స్కోర్ {credit_score} మరియు రుణం పరిమితి ₹{limit:,.0f}."
             elif language == "ta":
-                return f"உங்கள் கடன் மதிப்பெண் {credit_score} மற்றும் கடன் எடுக்கும் வரம்பு ₹{limit:,.0f}."
+                return f"உங்கள் பணப்பை நிலுவை ₹{wallet_bal:,.2f}, கடன் மதிப்பெண் {credit_score} மற்றும் கடன் வரம்பு ₹{limit:,.0f}."
             else:
-                return f"Your credit score is {credit_score} with a borrowing limit of ₹{limit:,.0f}."
+                return f"Your bank wallet balance is ₹{wallet_bal:,.2f}, credit score is {credit_score}, and borrowing limit is ₹{limit:,.0f}."
+
         
         if intent == "CHECK_CREDIT_SCORE":
             score = borrower.get("credit_score")

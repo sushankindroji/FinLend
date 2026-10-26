@@ -77,6 +77,7 @@ class RealtimeService:
         
         message = {
             "type": event_type,
+            "event": event_type,
             "data": data,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
@@ -101,6 +102,7 @@ class RealtimeService:
         
         message = {
             "type": event_type,
+            "event": event_type,
             "loan_id": loan_id,
             "data": data,
             "timestamp": datetime.now(timezone.utc).isoformat(),

@@ -157,7 +157,20 @@ export class CreditExplanationComponent {
     request$.subscribe({
       next: (res) => {
         this.loading.set(false);
-        this.explanation.set(res);
+        const rawFactors = res.factors || res.top_factors || [];
+        const factors = rawFactors.map((f: any) => ({
+          feature: f.display_name || f.feature,
+          importance: typeof f.importance === 'number' ? f.importance : (f.shap_value ? Math.min(1.0, Math.abs(f.shap_value)) : 0.5),
+          current_value: f.current_value !== undefined ? f.current_value : (f.value !== undefined ? f.value : '—'),
+          impact: f.impact || (f.shap_value && f.shap_value > 0 ? 'positive' : 'neutral'),
+        }));
+        this.explanation.set({
+          credit_score: res.credit_score,
+          risk_category: res.risk_category,
+          explanation: res.explanation,
+          recommendations: res.recommendations || [],
+          factors,
+        });
       },
       error: (err) => {
         this.loading.set(false);

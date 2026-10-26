@@ -132,7 +132,8 @@ def train_shap_explainer():
     
     print("Feature importance for test profile:")
     for feature, value in zip(X_test.columns, values):
-        print(f"  {feature:25s}: {value:+.4f}")
+        val_scalar = float(value[0]) if hasattr(value, '__len__') else float(value)
+        print(f"  {feature:25s}: {val_scalar:+.4f}")
     
     print("\n✓ SHAP explainer training complete!")
     return True

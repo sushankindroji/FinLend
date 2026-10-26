@@ -12,9 +12,10 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 from app.api.serializers import serialize_doc
 from app.core.security import get_current_user, require_role
 from app.db.mongodb import get_db
-from app.models.schemas import CreditScoreOut, UserPublic
+from app.models.schemas import CreditScoreOut, UserPublic, WalletAction
 from app.services.loan_service import oid
 from app.services.risk_service import evaluate_borrower_risk
+from app.services.realtime_service import get_realtime_service
 
 router = APIRouter(prefix="/api/users", tags=["users"])
 
@@ -34,6 +35,94 @@ async def get_me(user=Depends(get_current_user), db: AsyncIOMotorDatabase = Depe
     out = serialize_doc(doc)
     out.pop("password_hash", None)
     return out
+
+
+@router.post("/me/deposit")
+async def deposit_funds(
+    payload: WalletAction,
+    user=Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    amount = round(payload.amount, 2)
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="Deposit amount must be positive")
+
+    doc = await _get_user_or_404(db, user["id"])
+    field = "lending_balance" if doc["role"] == "lender" else "wallet_balance"
+
+    updated = await db.users.find_one_and_update(
+        {"_id": doc["_id"]},
+        {"$inc": {field: amount}},
+        return_document=True,
+    )
+    new_balance = round(updated.get(field, 0.0), 2)
+
+    await db.transactions.insert_one({
+        "user_id": doc["_id"],
+        "type": "DEPOSIT",
+        "amount": amount,
+        "created_at": datetime.now(timezone.utc),
+    })
+
+    realtime = get_realtime_service()
+    await realtime.notify_user(str(doc["_id"]), "wallet_balance_updated", {
+        "user_id": str(doc["_id"]),
+        "wallet_balance": new_balance,
+        "balance": new_balance,
+        "field": field,
+        "amount": amount,
+        "action": "DEPOSIT",
+    })
+
+    return {"status": "ok", "balance": new_balance, "wallet_balance": new_balance, "field": field}
+
+
+@router.post("/me/withdraw")
+async def withdraw_funds(
+    payload: WalletAction,
+    user=Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    amount = round(payload.amount, 2)
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="Withdrawal amount must be positive")
+
+    doc = await _get_user_or_404(db, user["id"])
+    field = "lending_balance" if doc["role"] == "lender" else "wallet_balance"
+    current_bal = doc.get(field, 0.0) or 0.0
+
+    if amount > current_bal:
+        raise HTTPException(status_code=400, detail=f"Insufficient balance. Current balance: ₹{current_bal:.2f}")
+
+    updated = await db.users.find_one_and_update(
+        {"_id": doc["_id"], field: {"$gte": amount}},
+        {"$inc": {field: -amount}},
+        return_document=True,
+    )
+    if not updated:
+        raise HTTPException(status_code=400, detail="Withdrawal failed due to insufficient funds or concurrent transaction")
+
+    new_balance = round(updated.get(field, 0.0), 2)
+
+    await db.transactions.insert_one({
+        "user_id": doc["_id"],
+        "type": "WITHDRAWAL",
+        "amount": amount,
+        "created_at": datetime.now(timezone.utc),
+    })
+
+    realtime = get_realtime_service()
+    await realtime.notify_user(str(doc["_id"]), "wallet_balance_updated", {
+        "user_id": str(doc["_id"]),
+        "wallet_balance": new_balance,
+        "balance": new_balance,
+        "field": field,
+        "amount": amount,
+        "action": "WITHDRAW",
+    })
+
+    return {"status": "ok", "balance": new_balance, "wallet_balance": new_balance, "field": field}
+
 
 
 @router.get("/me/credit-score", response_model=CreditScoreOut)

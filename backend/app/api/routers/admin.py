@@ -12,9 +12,11 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 from app.api.serializers import serialize_doc
 from app.core.security import require_role
 from app.db.mongodb import get_db
-from app.services.loan_service import oid
+from app.services.loan_service import oid, detect_and_process_overdue_loans
+from app.ml.fairness_audit import run_fairness_audit_on_database
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
+
 
 
 # ── Users ──────────────────────────────────────────────────────────────────
@@ -275,3 +277,26 @@ async def admin_export(
         media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+# ── Overdue Loan Processing ────────────────────────────────────────────────
+@router.post("/loans/detect-overdue")
+async def trigger_detect_overdue(
+    user=Depends(require_role("admin")),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    """Admin trigger to scan, identify, and transition all overdue loans."""
+    return await detect_and_process_overdue_loans(db)
+
+
+# ── AI Model Fairness & Bias Testing ───────────────────────────────────────
+@router.get("/ml/fairness")
+async def get_fairness_audit(
+    user=Depends(require_role("admin")),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    """Run four-fifths (80%) rule, demographic parity, and equal opportunity
+    bias audits across gender, age, and location.
+    """
+    return await run_fairness_audit_on_database(db)
+
